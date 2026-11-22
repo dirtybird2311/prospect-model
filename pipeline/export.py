@@ -23,7 +23,7 @@ LABELS = {'any_a': 'Adjusted yards per attempt', 'cmp_pct': 'Completion %', 'pas
 
 
 def _code():
-    files = ['config.py', 'fetch.py', 'college.py', 'features.py', 'advanced.py', 'models.py', 'export.py']
+    files = ['config.py', 'fetch.py', 'college.py', 'features.py', 'advanced.py', 'models.py', 'lookback.py', 'export.py']
     return [{'label': f, 'value': (ROOT / 'pipeline' / f).read_text(), 'type': 'code', 'lang': 'python'} for f in files]
 
 
@@ -82,3 +82,21 @@ def export(scored, val, back, w, run_at):
     b = b[b.drafted == 1][['id', 'name', 'pos', 'college_team', 'draft_year', 'pick', 'hit', 'best_rank', 'hit_pct', 'score_pct']]
     _write('backtest', b.sort_values(['draft_year', 'pick']), src + [
         {'label': 'Method', 'value': "Drafted players 2015-2021. Each player's hit % comes from models that never saw his draft class. score_pct ranks him among all pool players at his position, before the draft."}] + code)
+
+
+def export_lookback(sc, summ, season, run_at):
+    """Write lookback.json (one row per player in the class) and lookback_summary.json."""
+    src = [{'label': 'College stats', 'value': f'sportsdataverse/cfbfastR-data player_stats + rosters through {season - 1}'},
+           {'label': 'NFL data', 'value': f'nflverse draft_picks and stats_player_reg_{season} (regular season to date)'},
+           {'label': 'Run at', 'value': run_at},
+           {'label': 'Method', 'value': f'The {season} draft class scored with draft and hit models refit without that class, on college stats only (pre-combine). NFL rank = half-PPR points at his position this season. On hit pace = top 24 RB/WR or top 12 QB/TE. Contributing = within 2.5x that cut.'}] + _code()
+    s = sc.copy()
+    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct']:
+        s[c] = (s[c] * 100).round(1)
+    s['id'] = s.player_id.astype(str)
+    s['pts'] = s.pts.round(1)
+    s['ppg'] = s.ppg.round(1)
+    keep = ['id', 'model_rank', 'name', 'pos', 'college_team', 'conference', 'hit_pct', 'p_draft', 'p_hit_given_draft',
+            'drafted', 'pick', 'pick_rank', 'nfl_games', 'pts', 'ppg', 'nfl_rank', 'status']
+    _write('lookback', s[keep].sort_values(['pos', 'model_rank']), src)
+    _write('lookback_summary', summ, src)

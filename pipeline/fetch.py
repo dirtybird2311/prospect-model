@@ -26,3 +26,8 @@ def fetch_all():
         _get(f'{NFLVERSE}/{f}', DATA / 'nfl' / f.split('/')[-1], refresh=True)
     for yr in NFL_STAT_SEASONS:
         _get(f'{NFLVERSE}/stats_player/stats_player_reg_{yr}.csv', DATA / 'nfl' / f'stats_{yr}.csv')
+    # current NFL season so far, for the lookback at the latest draft class
+    try:
+        _get(f'{NFLVERSE}/stats_player/stats_player_reg_{PROSPECT_SEASON}.csv', DATA / 'nfl' / f'stats_{PROSPECT_SEASON}.csv', refresh=True)
+    except Exception as e:
+        print('no current-season NFL stats yet:', e)

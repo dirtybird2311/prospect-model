@@ -13,7 +13,9 @@ from pipeline.college import build_college
 from pipeline.features import build_pools
 from pipeline.advanced import build_advanced, attach
 from pipeline.models import fit_all, score, weights
-from pipeline.export import export
+from pipeline.export import export, export_lookback
+from pipeline.lookback import lookback
+from pipeline.config import PROSPECT_SEASON
 
 
 def main():
@@ -30,6 +32,10 @@ def main():
         pickle.dump(fitted, f)
     print(val[['pos', 'stage', 'draft_auc', 'hit_auc', 'overall_auc', 'drafted_top_q_hit', 'drafted_bottom_q_hit']].to_string(index=False))
     export(scored, val, back, weights(fitted), datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
+    sc, summ = lookback(pool, PROSPECT_SEASON)
+    if sc is not None:
+        export_lookback(sc, summ, PROSPECT_SEASON, datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
+        print(summ.to_string(index=False))
     print('done ->', OUT)
 
 

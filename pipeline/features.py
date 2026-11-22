@@ -111,6 +111,9 @@ def match_draft(cs):
             last = p.key.split()[-1] if p.key else ''
             cand = cs[win & (cs['last'] == last) & (cs.games >= 4) &
                       cs.tok.map(lambda t: len(t & ctok) > 0 and len(t & ctok) >= len(ctok) - 1)]
+            if cand.player_id.nunique() > 1 and p.key:
+                # several same-surname players at the school (Mike vs Michael Washington): break the tie on first initial
+                cand = cand[cand.key.str[:1] == p.key[:1]]
             if cand.player_id.nunique() != 1:
                 continue
         pid = cand.assign(o=cand.tok.map(lambda t: len(t & ctok))).sort_values(['o', 'season', 'games'], ascending=False).player_id.iloc[0]
