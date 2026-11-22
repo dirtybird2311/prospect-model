@@ -43,9 +43,9 @@ Run `python3 run.py` to reprint. As of Nov 21, 2026:
 | Pos | Draft AUC | Hit AUC (drafted) | Top vs bottom quarter of drafted players |
 |---|---|---|---|
 | QB | 0.91 | 0.75 | 47% vs 5% |
-| RB | 0.93 | 0.73 | 54% vs 11% |
-| WR | 0.91 | 0.61 | 25% vs 9% |
-| TE | 0.88 | 0.56 (0.76 with combine) | 33% vs 9% |
+| RB | 0.93 | 0.76 | 57% vs 6% |
+| WR | 0.91 | 0.63 | 28% vs 9% |
+| TE | 0.88 | 0.61 (0.77 with combine) | 38% vs 5% |
 
 ## Known limits
 
