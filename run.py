@@ -12,7 +12,8 @@ from pipeline.fetch import fetch_all
 from pipeline.college import build_college
 from pipeline.features import build_pools
 from pipeline.advanced import build_advanced, attach
-from pipeline.models import fit_all, score, weights
+from pipeline.models import fit_all, fit_post, score, weights
+import pandas as pd
 from pipeline.export import export, export_lookback
 from pipeline.lookback import lookback
 from pipeline.config import PROSPECT_SEASON
@@ -26,11 +27,15 @@ def main():
     adv = build_advanced()
     pool, pros = attach(pool, adv), attach(pros, adv)
     fitted, val, back = fit_all(pool)
+    post, post_val = fit_post(pool, fitted)
+    print(post_val.to_string(index=False))
+    val = pd.concat([val, post_val], ignore_index=True)
     scored = score(fitted, pros)
     OUT.mkdir(exist_ok=True)
     with open(DATA / 'fitted.pkl', 'wb') as f:
-        pickle.dump(fitted, f)
-    print(val[['pos', 'stage', 'draft_auc', 'hit_auc', 'overall_auc', 'drafted_top_q_hit', 'drafted_bottom_q_hit']].to_string(index=False))
+        pickle.dump((fitted, post), f)
+    pool.to_pickle(DATA / 'pool_adv.pkl')
+    print(val[val.stage != 'post'][['pos', 'stage', 'draft_auc', 'hit_auc', 'overall_auc', 'drafted_top_q_hit', 'drafted_bottom_q_hit']].to_string(index=False))
     export(scored, val, back, weights(fitted), datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
     sc, summ = lookback(pool, PROSPECT_SEASON)
     if sc is not None:

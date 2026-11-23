@@ -36,6 +36,10 @@ Both are per-position L2 logistic regressions on standardized inputs, regulariza
 
 **Combine stage:** once a prospect has combine results (nflverse updates in early March), he's scored with models that add combine invite and athletic testing. No recruiting rankings: the data source doesn't include them.
 
+**Post-draft stage:** once a player is drafted, hit odds come from draft slot plus his college hit score (QB, RB) or draft slot alone (WR, TE, where the college score added nothing on top of draft slot). Used by the lookback, and for the board after each April draft. Tested and left out: explosive-run rate, drafted RB teammates, committee-back flags.
+
+**Lookback (`pipeline/lookback.py`):** scores the most recent draft class with models refit without it, next to its draft slots and current-season half-PPR results.
+
 ## Validation (leave-one-draft-class-out)
 
 Run `python3 run.py` to reprint. As of Nov 21, 2026:
@@ -46,6 +50,8 @@ Run `python3 run.py` to reprint. As of Nov 21, 2026:
 | RB | 0.93 | 0.76 | 57% vs 6% |
 | WR | 0.91 | 0.63 | 28% vs 9% |
 | TE | 0.88 | 0.61 (0.77 with combine) | 38% vs 5% |
+
+Post-draft hit accuracy (drafted 2015–2021, nested leave-one-class-out): QB 0.90 (draft slot alone 0.89), RB 0.85 (0.83), WR 0.83, TE 0.86.
 
 ## Known limits
 

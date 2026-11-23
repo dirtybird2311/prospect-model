@@ -1,8 +1,8 @@
 """Lookback: how the model would have rated the most recent draft class, against what's happened since.
 
-Draft and hit models are refit without that class (the hit model never sees it anyway: it trains on
-classes with a full 5-year window), and players are scored on college stats only, as of the end of
-their final college season, before the combine. Their NFL results come from nflverse's current-season
+Draft, hit and post-draft models are refit without that class (the hit model never sees it anyway: it trains
+on classes with a full 5-year window). Players are scored on college stats as of the end of their final
+college season, before the combine, and again once their draft slot is known (post-draft hit %). Their NFL results come from nflverse's current-season
 player stats, ranked by half-PPR points at their position.
 """
 import numpy as np
@@ -25,10 +25,13 @@ def lookback(pool, season):
     path = DATA / 'nfl' / f'stats_{season}.csv'
     if not path.exists() or not (pool.draft_year == season).any():
         return None, None
-    fitted, _, _ = M.fit_all(pool[pool.draft_year < season])
+    train = pool[pool.draft_year < season]
+    fitted, _, _ = M.fit_all(train)
+    post, _ = M.fit_post(train, fitted)
     cls = pool[pool.draft_year == season].copy()
     cls['at_combine'] = 0
     sc = M.score(fitted, cls)
+    sc['post_hit_pct'] = M.score_post(post, fitted, cls)['post_hit_pct'].values
 
     st = pd.read_csv(path, low_memory=False)
     st = st[st.position.isin(POS)].copy()
@@ -54,6 +57,7 @@ def lookback(pool, season):
         rest = x[x.model_rank > 10]
         summ.append({'id': pos, 'pos': pos, 'drafted': len(x),
                      'model_corr': round(float(spearmanr(x.hit_pct, x.pts)[0]), 2),
+                     'post_corr': round(float(spearmanr(x.post_hit_pct, x.pts)[0]), 2),
                      'pick_corr': round(float(spearmanr(-x.pick, x.pts)[0]), 2),
                      'top10_pts': round(float(top.pts.mean()), 1) if len(top) else None,
                      'rest_pts': round(float(rest.pts.mean()), 1) if len(rest) else None,

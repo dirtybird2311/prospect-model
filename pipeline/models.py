@@ -150,6 +150,70 @@ def score(fitted, pros):
     return out
 
 
+# ---------------- post-draft stage ----------------
+# Once a player is drafted, hit odds = f(draft slot, college hit score). Tested Nov 22, 2026 (nested leave-one-class-out):
+# the college score added to draft slot for QB (AUC .893 -> .902) and RB (.834 -> .849) but not WR (.831 -> .801)
+# or TE (.860 -> .856), so WR/TE post-draft odds use draft slot alone. Explosive-run rate, drafted RB teammates and
+# committee-back flags were also tested and left out.
+POST_COLLEGE = {'QB': True, 'RB': True, 'WR': False, 'TE': False}
+
+
+def _logit(p):
+    p = np.clip(p, 1e-4, 1 - 1e-4)
+    return np.log(p / (1 - p))
+
+
+def _post_X(log_pick, college_p, pos):
+    return np.column_stack([log_pick, _logit(college_p)]) if POST_COLLEGE[pos] else np.column_stack([log_pick])
+
+
+def _stack():
+    return make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=5000))
+
+
+def fit_post(pool, fitted):
+    """Post-draft hit models per position. Returns (post_models, validation_df)."""
+    post, val = {}, []
+    for pos in ['QB', 'RB', 'WR', 'TE']:
+        if (pos, 'base') not in fitted:
+            continue
+        dp = add_derived(pool[pool.pos == pos]).reset_index(drop=True)
+        d = dp[(dp.drafted == 1) & dp.hit_complete].reset_index(drop=True)
+        hm = fitted[(pos, 'base')]['hit']
+        cols, C = hm['cols'], hm['C']
+        y, yrs, lp = d.hit.values, d.draft_year, np.log(d.pick.values)
+        oof, oof_pick = np.full(len(d), np.nan), np.full(len(d), np.nan)
+        for g in sorted(yrs.unique()):
+            tr = (yrs != g).values
+            te = ~tr
+            dt = d[tr].reset_index(drop=True)
+            inner = _oof(dt, y[tr], cols, C, dt.draft_year)   # college scores the stacker trains on, out of fold
+            sc_te = _model(C).fit(d.loc[tr, cols], y[tr]).predict_proba(d.loc[te, cols])[:, 1]
+            oof[te] = _stack().fit(_post_X(lp[tr], inner, pos), y[tr]).predict_proba(_post_X(lp[te], sc_te, pos))[:, 1]
+            oof_pick[te] = _stack().fit(lp[tr, None], y[tr]).predict_proba(lp[te, None])[:, 1]
+        post[pos] = _stack().fit(_post_X(lp, hm['oof'], pos), y)
+        q = pd.qcut(pd.Series(oof).rank(method='first'), 4, labels=False).values
+        val.append({'pos': pos, 'stage': 'post', 'hit_auc': round(roc_auc_score(y, oof), 3),
+                    'pick_only_auc': round(roc_auc_score(y, oof_pick), 3), 'hit_n': len(d), 'hits': int(y.sum()),
+                    'uses_college_score': POST_COLLEGE[pos],
+                    'drafted_top_q_hit': round(y[q == 3].mean(), 3), 'drafted_bottom_q_hit': round(y[q == 0].mean(), 3)})
+    return post, pd.DataFrame(val)
+
+
+def score_post(post, fitted, df):
+    """Post-draft hit odds for rows with a draft pick."""
+    out = add_derived(df)
+    out['post_hit_pct'] = np.nan
+    for pos, st in post.items():
+        m = (out.pos == pos) & out.pick.notna()
+        if not m.any():
+            continue
+        hm = fitted[(pos, 'base')]['hit']
+        college = hm['model'].predict_proba(out.loc[m, hm['cols']])[:, 1]
+        out.loc[m, 'post_hit_pct'] = st.predict_proba(_post_X(np.log(out.loc[m, 'pick'].values), college, pos))[:, 1]
+    return out
+
+
 def weights(fitted):
     rows = []
     for (pos, stage), f in fitted.items():

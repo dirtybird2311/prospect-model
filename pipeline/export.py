@@ -63,10 +63,11 @@ def export(scored, val, back, w, run_at):
         {'label': 'Definitions', 'value': 'Hit % = draft odds x hit odds if drafted. A hit is a top-24 RB/WR or top-12 QB/TE half-PPR season within his first 5 NFL seasons. Model score = percentile of hit % among current prospects at his position. Draft odds treat this season as his last in college.'}] + code)
 
     v = val.copy()
-    v['stage_label'] = v.stage.map({'base': 'College stats', 'combine': 'Stats + combine'})
+    v['stage_label'] = v.stage.map({'base': 'College stats', 'combine': 'Stats + combine', 'post': 'Post-draft (draft slot + college score)'})
     v['id'] = v.pos + '-' + v.stage
     for c in ['drafted_top_q_hit', 'drafted_bottom_q_hit', 'base_rate', 'cal_top_decile_pred', 'cal_top_decile_actual']:
-        v[c] = (v[c] * 100).round(1)
+        if c in v:
+            v[c] = (v[c] * 100).round(1)
     _write('validation', v, src + [
         {'label': 'Method', 'value': 'Leave-one-draft-class-out: each class is scored by models fit on the others. Draft model: every FBS QB/RB/WR/TE with a real role whose college career ended 2014-2025. Hit model: drafted players from 2015-2021 (full 5-year window). AUC = chance a random hit is ranked above a random miss (0.5 = coin flip). Quarter hit rates are among drafted players, ranked by hit %.'}] + code)
 
@@ -89,14 +90,14 @@ def export_lookback(sc, summ, season, run_at):
     src = [{'label': 'College stats', 'value': f'sportsdataverse/cfbfastR-data player_stats + rosters through {season - 1}'},
            {'label': 'NFL data', 'value': f'nflverse draft_picks and stats_player_reg_{season} (regular season to date)'},
            {'label': 'Run at', 'value': run_at},
-           {'label': 'Method', 'value': f'The {season} draft class scored with draft and hit models refit without that class, on college stats only (pre-combine). NFL rank = half-PPR points at his position this season. On hit pace = top 24 RB/WR or top 12 QB/TE. Contributing = within 2.5x that cut.'}] + _code()
+           {'label': 'Method', 'value': f'The {season} draft class scored with draft and hit models refit without that class, on college stats only (pre-combine). NFL rank = half-PPR points at his position this season. Post-draft hit % = hit odds once draft slot is known (draft slot + college score for QB/RB, draft slot alone for WR/TE). On hit pace = top 24 RB/WR or top 12 QB/TE. Contributing = within 2.5x that cut.'}] + _code()
     s = sc.copy()
-    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct']:
+    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct', 'post_hit_pct']:
         s[c] = (s[c] * 100).round(1)
     s['id'] = s.player_id.astype(str)
     s['pts'] = s.pts.round(1)
     s['ppg'] = s.ppg.round(1)
     keep = ['id', 'model_rank', 'name', 'pos', 'college_team', 'conference', 'hit_pct', 'p_draft', 'p_hit_given_draft',
-            'drafted', 'pick', 'pick_rank', 'nfl_games', 'pts', 'ppg', 'nfl_rank', 'status']
+            'post_hit_pct', 'drafted', 'pick', 'pick_rank', 'nfl_games', 'pts', 'ppg', 'nfl_rank', 'status']
     _write('lookback', s[keep].sort_values(['pos', 'model_rank']), src)
     _write('lookback_summary', summ, src)
