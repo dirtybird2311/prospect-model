@@ -17,7 +17,7 @@ ACCENT, ACCENT_DIM = (34, 197, 139), (30, 80, 64)
 GF = '/usr/share/fonts/truetype/google-fonts/ofl'
 ANTON = f'{GF}/anton/Anton-Regular.ttf'
 DMS = f'{GF}/dmsans/DMSans[opsz,wght].ttf'
-PAD = 0.35   # silence after each clip
+PAD = 0.2   # silence after each clip
 
 RBS = [  # from out/prospects.json, Nov 24, 2026: odds of a top-12 (RB1) season in his first five, incl. draft odds
     {'rank': 1, 'name': 'Cole Tabb', 'school': 'Cincinnati', 'odds': 26.2},

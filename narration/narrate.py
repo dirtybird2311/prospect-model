@@ -18,14 +18,18 @@ def main(script_path, out_dir):
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     pipe = KPipeline(lang_code='a')   # American English
-    timings = []
-    for seg in spec['segments']:
-        audio = np.concatenate([np.asarray(a) for _, _, a in pipe(seg['text'], voice=spec.get('voice', 'af_heart'),
-                                                                speed=spec.get('speed', 1.0))])
-        sf.write(out / f"{seg['id']}.wav", audio, SR)
-        timings.append({'id': seg['id'], 'seconds': round(len(audio) / SR, 3), 'text': seg['text']})
-        print(seg['id'], timings[-1]['seconds'])
-    (out / 'timings.json').write_text(json.dumps(timings, indent=1))
+    # one voice, or several "variants" to compare (each into its own subfolder)
+    variants = spec.get('variants') or [{'tag': '', 'voice': spec.get('voice', 'af_heart'), 'speed': spec.get('speed', 1.0)}]
+    for v in variants:
+        vout = out / v['tag'] if v['tag'] else out
+        vout.mkdir(parents=True, exist_ok=True)
+        timings = []
+        for seg in spec['segments']:
+            audio = np.concatenate([np.asarray(a) for _, _, a in pipe(seg['text'], voice=v['voice'], speed=v['speed'])])
+            sf.write(vout / f"{seg['id']}.wav", audio, SR)
+            timings.append({'id': seg['id'], 'seconds': round(len(audio) / SR, 3), 'text': seg['text']})
+            print(v['tag'], seg['id'], timings[-1]['seconds'])
+        (vout / 'timings.json').write_text(json.dumps(timings, indent=1))
 
 
 if __name__ == '__main__':

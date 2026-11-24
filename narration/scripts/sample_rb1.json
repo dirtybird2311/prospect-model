@@ -1,9 +1,45 @@
-{"voice": "am_michael", "speed": 1.05,
+{
+ "variants": [
+  {
+   "tag": "puck",
+   "voice": "am_puck",
+   "speed": 1.2
+  },
+  {
+   "tag": "liam",
+   "voice": "am_liam",
+   "speed": 1.2
+  },
+  {
+   "tag": "heart",
+   "voice": "af_heart",
+   "speed": 1.15
+  }
+ ],
  "segments": [
-  {"id": "hook", "text": "Which college running backs are most likely to become RB1s in the NFL? Here's what the Statable model says."},
-  {"id": "three", "text": "Number three: J'Koby Williams, Texas Tech. A twenty percent chance of at least one top twelve season in his first five years."},
-  {"id": "two", "text": "Number two: Jadan Baugh, Florida. Twenty one percent."},
-  {"id": "one", "text": "And number one: Cole Tabb, Cincinnati. Twenty six percent. He's putting up a hundred thirty one scrimmage yards a game, and he catches passes."},
-  {"id": "context", "text": "For context, only about one in six drafted running backs ever has an RB1 season."},
-  {"id": "cta", "text": "Full board, and our track record, at statable F F dot com."}
- ]}
+  {
+   "id": "hook",
+   "text": "Which college running backs are most likely to become NFL RB1s? Here's what our model says."
+  },
+  {
+   "id": "three",
+   "text": "Number three: J'Koby Williams, Texas Tech. A twenty percent chance at a top twelve season in his first five years."
+  },
+  {
+   "id": "two",
+   "text": "Number two: Jadan Baugh, Florida. Twenty one percent."
+  },
+  {
+   "id": "one",
+   "text": "Number one: Cole Tabb, Cincinnati. Twenty six percent. A hundred thirty one scrimmage yards a game, and he catches passes."
+  },
+  {
+   "id": "context",
+   "text": "Only about one in six drafted running backs ever has an RB1 season."
+  },
+  {
+   "id": "cta",
+   "text": "Full board and track record at statable F F dot com."
+  }
+ ]
+}
