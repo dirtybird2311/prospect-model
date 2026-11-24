@@ -13,7 +13,7 @@ from pipeline.college import build_college
 from pipeline.features import build_pools
 from pipeline.advanced import build_advanced, attach
 from pipeline.recruiting import recruit_table, attach_recruiting
-from pipeline.models import fit_all, fit_post, score, weights
+from pipeline.models import fit_all, fit_post, fit_tiers, score, score_tiers, weights
 import pandas as pd
 from pipeline.export import export, export_lookback
 from pipeline.lookback import lookback
@@ -30,10 +30,15 @@ def main():
     rt = recruit_table(cs)
     pool, pros = attach_recruiting(pool, rt), attach_recruiting(pros, rt)
     fitted, val, back = fit_all(pool)
-    post, post_val = fit_post(pool, fitted)
+    scored = score(fitted, pros)
+    tiers, tier_val = fit_tiers(pool, fitted)
+    print(tier_val.to_string(index=False))
+    scored = score_tiers(tiers, scored)
+    post, post_val = fit_post(pool, fitted, tiers)
     print(post_val.to_string(index=False))
     val = pd.concat([val, post_val], ignore_index=True)
-    scored = score(fitted, pros)
+    tier_val['stage'] = 'tier-' + tier_val.stage + '-top' + tier_val.cut.astype(str)
+    val = pd.concat([val, tier_val.rename(columns={'auc': 'hit_auc'})], ignore_index=True)
     OUT.mkdir(exist_ok=True)
     with open(DATA / 'fitted.pkl', 'wb') as f:
         pickle.dump((fitted, post), f)

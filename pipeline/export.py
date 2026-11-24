@@ -55,13 +55,14 @@ def export(scored, val, back, w, run_at):
     s = scored.copy()
     s['key_stats'] = s.apply(key_stats, axis=1)
     s['rank'] = s.groupby('pos').hit_pct.rank(ascending=False, method='first').astype(int)
-    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct']:
-        s[c] = (s[c] * 100).round(1)
+    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct', 'p_top12', 'p_top24', 'p_top36', 'tier1', 'tier2', 'tier3']:
+        if c in s:
+            s[c] = (s[c] * 100).round(1)
     s['player_id'] = s.player_id.astype(str)
     keep = ['player_id', 'rank', 'name', 'pos', 'college_team', 'conference', 'final_season', 'used_prior_season',
-            'est_draft_age', 'recruit_rating', 'recruit_stars', 'unrated', 'rush_success', 'fd_per_carry', 'rec_ypg_vs_power', 'tgt_success', 'rec_explosive', 'yds_per_tgt', 'p_draft', 'p_hit_given_draft', 'hit_pct', 'model_score', 'stage', 'key_stats', 'games']
+            'est_draft_age', 'recruit_rating', 'recruit_stars', 'unrated', 'rush_success', 'fd_per_carry', 'rec_ypg_vs_power', 'tgt_success', 'rec_explosive', 'yds_per_tgt', 'p_draft', 'p_hit_given_draft', 'hit_pct', 'p_top12', 'p_top24', 'p_top36', 'tier1', 'tier2', 'tier3', 'model_score', 'stage', 'key_stats', 'games']
     _write('prospects', s[keep].sort_values(['pos', 'rank']), src + [
-        {'label': 'Definitions', 'value': 'Hit % = draft odds x hit odds if drafted (recalibrated to backtest hit rates only where that clearly improved accuracy: TEs once combine results are in). QB/WR/TE hit odds come from a model of best-season fantasy points, RB hit odds from a hit/miss model. A hit is a top-24 RB/WR or top-12 QB/TE half-PPR season within his first 5 NFL seasons. Model score = percentile of hit % among current prospects at his position. Draft odds treat this season as his last in college.'}] + code)
+        {'label': 'Definitions', 'value': 'Hit % = draft odds x hit odds if drafted (recalibrated to backtest hit rates only where that clearly improved accuracy: TEs once combine results are in). QB/WR/TE hit odds come from a model of best-season fantasy points, RB hit odds from a hit/miss model. A hit is a top-24 RB/WR or top-12 QB/TE half-PPR season within his first 5 NFL seasons. Model score = percentile of hit % among current prospects at his position. Draft odds treat this season as his last in college. RB and WR tiers (12-team league): tier1 = best season in the top 12 (RB1/WR1), tier2 = best season 13-24 (RB2/WR2), tier3 = best season 25-36 (flex); p_top12/24/36 are the cumulative odds, all including draft odds.'}] + code)
 
     v = val.copy()
     v['stage_label'] = v.stage.map({'base': 'College stats', 'combine': 'Stats + combine', 'post': 'Post-draft (draft slot + college score)'})
@@ -91,14 +92,17 @@ def export_lookback(sc, summ, season, run_at):
     src = [{'label': 'College stats', 'value': f'sportsdataverse/cfbfastR-data player_stats + rosters through {season - 1}'},
            {'label': 'NFL data', 'value': f'nflverse draft_picks and stats_player_reg_{season} (regular season to date)'},
            {'label': 'Run at', 'value': run_at},
-           {'label': 'Method', 'value': f'The {season} draft class scored with draft and hit models refit without that class, on college stats only (pre-combine). NFL rank = half-PPR points at his position this season. Post-draft hit % = hit odds once draft slot is known (draft slot + college score for QB/RB, draft slot alone for WR/TE). On hit pace = top 24 RB/WR or top 12 QB/TE. Contributing = within 2.5x that cut.'}] + _code()
+           {'label': 'Method', 'value': f'The {season} draft class scored with draft and hit models refit without that class, on college stats only (pre-combine). NFL rank = half-PPR points at his position this season. Post-draft hit % = hit odds once draft slot is known (draft slot + college score for QB/RB, draft slot alone for WR/TE); undrafted players who signed with a team are scored as pick 300. tier1/2/3 (RB/WR) = odds his best season is top 12 / 13-24 / 25-36 at his position (RB1-WR1 / RB2-WR2 / flex in a 12-team league), pre-draft (tier) and post-draft (post_tier). On hit pace = top 24 RB/WR or top 12 QB/TE. Contributing = within 2.5x that cut.'}] + _code()
     s = sc.copy()
-    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct', 'post_hit_pct']:
-        s[c] = (s[c] * 100).round(1)
+    for c in ['p_draft', 'p_hit_given_draft', 'hit_pct', 'post_hit_pct', 'p_top12', 'p_top24', 'p_top36', 'tier1', 'tier2',
+              'tier3', 'post_top12', 'post_top24', 'post_top36', 'post_tier1', 'post_tier2', 'post_tier3']:
+        if c in s:
+            s[c] = (s[c] * 100).round(1)
     s['id'] = s.player_id.astype(str)
+    s['signed_udfa'] = s.udfa_signed.fillna(0).astype(int)
     s['pts'] = s.pts.round(1)
     s['ppg'] = s.ppg.round(1)
     keep = ['id', 'model_rank', 'name', 'pos', 'college_team', 'conference', 'hit_pct', 'p_draft', 'p_hit_given_draft',
-            'post_hit_pct', 'drafted', 'pick', 'pick_rank', 'nfl_games', 'pts', 'ppg', 'nfl_rank', 'status']
+            'post_hit_pct', 'tier1', 'tier2', 'tier3', 'post_tier1', 'post_tier2', 'post_tier3', 'drafted', 'signed_udfa', 'pick', 'pick_rank', 'nfl_games', 'pts', 'ppg', 'nfl_rank', 'status']
     _write('lookback', s[keep].sort_values(['pos', 'model_rank']), src)
     _write('lookback_summary', summ, src)

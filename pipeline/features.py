@@ -211,7 +211,31 @@ def build_pools(cs):
     pool.loc[pool.combine_year != pool.draft_year, ['forty', 'vertical', 'broad_jump', 'cone', 'speed_score', 'c_wt']] = np.nan
     pool['at_combine'] = (pool.combine_year == pool.draft_year).astype(int)
 
-    # ---- outcomes for drafted players ----
+    # ---- undrafted players who signed with an NFL team (any roster, practice squad included) ----
+    # nflverse's player table carries ESPN ids, the same ids the college stats use.
+    pl = pd.read_csv(DATA / 'nfl' / 'players.csv', low_memory=False, usecols=['gsis_id', 'espn_id', 'rookie_season', 'draft_pick', 'display_name', 'college_name'])
+    pl = pl[pl.draft_pick.isna() & pl.gsis_id.notna()].copy()
+    plid = pl[pd.to_numeric(pl.espn_id, errors='coerce').notna()].copy()
+    plid['espn_id'] = pd.to_numeric(plid.espn_id).astype('int64')
+    umap = plid.drop_duplicates('espn_id').set_index('espn_id')
+    pid = pool.player_id.astype('int64')
+    yr = pid.map(umap.rookie_season)
+    signed = (pool.drafted == 0) & pid.isin(umap.index) & (yr.isna() | yr.between(pool.draft_year - 1, pool.draft_year + 1))
+    pool['udfa_signed'] = signed.astype(int)
+    pool.loc[signed, 'gsis_id'] = pid[signed].map(umap.gsis_id)
+    # older college ids aren't ESPN ids: fall back to name + college + rookie season within a year
+    pl['key'] = pl.display_name.map(norm)
+    pl['tok'] = pl.college_name.fillna('').map(lambda c: set().union(*[school_tokens(x.strip()) for x in c.split(';')]) if c else set())
+    rest = pool[(pool.drafted == 0) & (pool.udfa_signed == 0)].assign(key=lambda x: x.name.map(norm))
+    mm = rest[['player_id', 'key', 'college_team', 'draft_year']].merge(pl[['key', 'tok', 'gsis_id', 'rookie_season']], on='key')
+    mm = mm[(mm.rookie_season - mm.draft_year).abs() <= 1]
+    mm = mm[[len(school_tokens(t) & k) > 0 for t, k in zip(mm.college_team, mm.tok)]]
+    mm = mm[~mm.gsis_id.isin(pool.gsis_id.dropna())].groupby('player_id').filter(lambda g: len(g) == 1).set_index('player_id')
+    fb = pool.player_id.isin(mm.index)
+    pool.loc[fb, 'udfa_signed'] = 1
+    pool.loc[fb, 'gsis_id'] = pool.loc[fb, 'player_id'].map(mm.gsis_id)
+
+    # ---- outcomes for drafted players and signed undrafted players ----
     st = pd.concat([pd.read_csv(DATA / 'nfl' / f'stats_{y}.csv', low_memory=False) for y in NFL_STAT_SEASONS])
     st['pts'] = (st.passing_yards.fillna(0) * 0.04 + st.passing_tds.fillna(0) * 4 - st.passing_interceptions.fillna(0) * 2
                  + st.rushing_yards.fillna(0) * 0.1 + st.rushing_tds.fillna(0) * 6 + st.receptions.fillna(0) * 0.5
@@ -225,7 +249,7 @@ def build_pools(cs):
     cutpts = st[st['rank'] == st.position.map(HIT_CUT)].set_index(['season', 'position']).pts
     st['rel'] = st.pts / st.set_index(['season', 'position']).index.map(cutpts).values
     hits = []
-    for _, r in pool[pool.drafted == 1].iterrows():
+    for _, r in pool[(pool.drafted == 1) | (pool.udfa_signed == 1)].iterrows():
         s = st[(st.player_id == r.gsis_id) & st.season.between(r.draft_year, r.draft_year + HIT_WINDOW - 1)]
         first = s[s.startable].season.min() if s.startable.any() else np.nan
         hits.append((r.player_id, int(s.startable.any()), s['rank'].min() if len(s) else np.nan,

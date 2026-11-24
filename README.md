@@ -38,6 +38,10 @@ Draft odds: per-position L2 logistic regression. Hit odds: RB uses L2 logistic r
 
 **Post-draft stage:** once a player is drafted, hit odds come from draft slot plus his college hit score (QB, RB) or draft slot alone (WR, TE, where the college score added nothing on top of draft slot). Used by the lookback, and for the board after each April draft. Tested and left out: explosive-run rate, drafted RB teammates, committee-back flags, landing spot (`pipeline/landing.py`: vacated opportunity, team offense) and real birth dates. Also tested and left out elsewhere: QB athletic testing.
 
+**Fantasy tiers (RB/WR):** odds a player's best season in his first five reaches the top 12 (RB1/WR1), 13–24 (RB2/WR2) or 25–36 (flex) in a 12-team league; one model per line (RB: logistic; WR: the points model with its own calibration). Backtest AUC, top 12/24/36: RB .81/.78/.76, WR .70/.71/.69.
+
+**Undrafted signings:** undrafted players who signed with an NFL team (from nflverse's player table, by ESPN id or name + school) get post-draft odds as if picked 300th. Only 7 of 530 such QB/RB/WR/TE signees from 2015–2021 hit, so their odds stay near that base rate.
+
 **Lookback (`pipeline/lookback.py`):** scores the most recent draft class with models refit without it, next to its draft slots and current-season half-PPR results.
 
 ## Validation (leave-one-draft-class-out)

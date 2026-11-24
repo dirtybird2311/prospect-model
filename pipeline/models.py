@@ -261,6 +261,54 @@ def score(fitted, pros):
     return out
 
 
+# ---------------- fantasy tiers (RB, WR) ----------------
+# P(best season within 5 years reaches the top 12 / top 24 / top 36 at his position | drafted): RB1, RB2, flex
+# in a 12-team league. Each line gets its own hit model (RB: logistic on that line; WR: the points model with a
+# calibrator for that line). Leave-one-class-out AUC, Nov 23, 2026: RB .814/.775/.763, WR .703/.710/.686.
+TIER_CUTS = [12, 24, 36]
+TIER_POS = ['RB', 'WR']
+
+
+def fit_tiers(pool, fitted):
+    tiers, val = {}, []
+    for pos in TIER_POS:
+        if (pos, 'base') not in fitted:
+            continue
+        dp = add_derived(pool[pool.pos == pos]).reset_index(drop=True)
+        d = dp[(dp.drafted == 1) & dp.hit_complete].reset_index(drop=True)
+        x = dp[(dp.drafted == 1) & ~dp.hit_complete & (dp.seasons_obs >= MIN_PARTIAL_SEASONS)].reset_index(drop=True)
+        for stage in ['base', 'combine']:
+            cols = fitted[(pos, stage)]['hit']['cols']
+            for cut in TIER_CUTS:
+                dd = d.assign(hit=(d.best_rank <= cut).astype(int))
+                xx = x.assign(hit=(x.best_rank <= cut).astype(int))
+                m = fitted[(pos, stage)]['hit'] if cut == 24 else _fit_hit(dd, xx, cols, pos)
+                tiers[(pos, stage, cut)] = m
+                val.append({'pos': pos, 'stage': stage, 'cut': cut, 'auc': round(m['auc'], 3),
+                            'drafted_rate': round(dd.hit.mean(), 3), 'n': len(dd)})
+    return tiers, pd.DataFrame(val)
+
+
+def score_tiers(tiers, scored):
+    """Adds p_top12/24/36 (probability incl. draft odds) and exclusive tier odds for RB/WR rows of `scored`."""
+    out = add_derived(scored)
+    for pos in TIER_POS:
+        for stage in ['base', 'combine']:
+            m = (out.pos == pos) & (out.stage == stage)
+            if not m.any() or (pos, stage, 24) not in tiers:
+                continue
+            p = np.column_stack([tiers[(pos, stage, c)]['model'].predict_proba(out.loc[m, tiers[(pos, stage, c)]['cols']])[:, 1]
+                                 for c in TIER_CUTS])
+            p = np.maximum.accumulate(p, axis=1)          # top-12 <= top-24 <= top-36
+            for i, c in enumerate(TIER_CUTS):
+                out.loc[m, f'p_top{c}'] = out.loc[m, 'p_draft'].values * p[:, i]
+    if 'p_top12' in out:
+        out['tier1'] = out.p_top12
+        out['tier2'] = out.p_top24 - out.p_top12
+        out['tier3'] = out.p_top36 - out.p_top24
+    return out
+
+
 # ---------------- post-draft stage ----------------
 # Once a player is drafted, hit odds = f(draft slot, college hit score). Tested Nov 22, 2026 (nested leave-one-class-out):
 # the college score added to draft slot for QB (AUC .893 -> .902) and RB (.834 -> .849) but not WR (.831 -> .801)
@@ -282,46 +330,96 @@ def _stack():
     return make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=5000))
 
 
-def fit_post(pool, fitted):
-    """Post-draft hit models per position. Returns (post_models, validation_df)."""
+UDFA_PICK = 300   # undrafted players who sign with a team enter the post-draft models as pick 300
+
+
+def _post_cuts(pos):
+    return TIER_CUTS if pos in TIER_POS else [12]
+
+
+def _college_model(fitted, tiers, pos, cut):
+    return tiers[(pos, 'base', cut)] if pos in TIER_POS and tiers is not None else fitted[(pos, 'base')]['hit']
+
+
+def _college_scores(d, drafted, cm, skip=None):
+    """College hit score for every row of d, each class scored by a model fit on drafted rows of other classes."""
+    p = np.full(len(d), np.nan)
+    for h in sorted(d.draft_year.unique()):
+        if h == skip:
+            continue
+        tr = d[drafted & (d.draft_year != h) & (d.draft_year != skip)].reset_index(drop=True)
+        te = (d.draft_year == h).values
+        p[te] = _hit_model(tr, cm['extra'], cm['cols'], cm['C'], cm['kind']).predict_proba(d.loc[te, cm['cols']])[:, 1]
+    return p
+
+
+def fit_post(pool, fitted, tiers=None):
+    """Post-draft models: drafted players and undrafted players who signed with a team.
+    For RB/WR one per fantasy tier line (top 12 / 24 / 36), for QB/TE the hit line. Returns (models, validation)."""
     post, val = {}, []
     for pos in ['QB', 'RB', 'WR', 'TE']:
         if (pos, 'base') not in fitted:
             continue
         dp = add_derived(pool[pool.pos == pos]).reset_index(drop=True)
-        d = dp[(dp.drafted == 1) & dp.hit_complete].reset_index(drop=True)
-        hm = fitted[(pos, 'base')]['hit']
-        cols, C = hm['cols'], hm['C']
-        y, yrs, lp = d.hit.values, d.draft_year, np.log(d.pick.values)
-        oof, oof_pick = np.full(len(d), np.nan), np.full(len(d), np.nan)
-        for g in sorted(yrs.unique()):
-            tr = (yrs != g).values
-            te = ~tr
-            dt = d[tr].reset_index(drop=True)
-            inner = _hit_oof(dt, hm['extra'], cols, C, hm['kind'])   # college scores the stacker trains on, out of fold
-            sc_te = _hit_model(dt, hm['extra'], cols, C, hm['kind']).predict_proba(d.loc[te, cols])[:, 1]
-            oof[te] = _stack().fit(_post_X(lp[tr], inner, pos), y[tr]).predict_proba(_post_X(lp[te], sc_te, pos))[:, 1]
-            oof_pick[te] = _stack().fit(lp[tr, None], y[tr]).predict_proba(lp[te, None])[:, 1]
-        post[pos] = _stack().fit(_post_X(lp, hm['oof'], pos), y)
-        q = pd.qcut(pd.Series(oof).rank(method='first'), 4, labels=False).values
-        val.append({'pos': pos, 'stage': 'post', 'hit_auc': round(roc_auc_score(y, oof), 3),
-                    'pick_only_auc': round(roc_auc_score(y, oof_pick), 3), 'hit_n': len(d), 'hits': int(y.sum()),
-                    'uses_college_score': POST_COLLEGE[pos],
-                    'drafted_top_q_hit': round(y[q == 3].mean(), 3), 'drafted_bottom_q_hit': round(y[q == 0].mean(), 3)})
+        d = dp[((dp.drafted == 1) | (dp.udfa_signed == 1)) & dp.hit_complete].reset_index(drop=True)
+        drafted = (d.drafted == 1).values
+        lp = np.log(d.pick.fillna(UDFA_PICK).values)
+        yrs = d.draft_year
+        for cut in _post_cuts(pos):
+            cm = _college_model(fitted, tiers, pos, cut)
+            y = (d.best_rank <= cut).fillna(False).astype(int).values
+            use_c = POST_COLLEGE[pos]
+            oof = np.full(len(d), np.nan)
+            for g in sorted(yrs.unique()):
+                tr = (yrs != g).values
+                te = ~tr
+                if use_c:
+                    inner = _college_scores(d, drafted, cm, skip=g)[tr]
+                    trd = d[drafted & tr].reset_index(drop=True)
+                    sc_te = _hit_model(trd, cm['extra'], cm['cols'], cm['C'], cm['kind']).predict_proba(d.loc[te, cm['cols']])[:, 1]
+                else:
+                    inner = sc_te = None
+                st = _stack().fit(_post_X(lp[tr], inner, pos), y[tr])
+                oof[te] = st.predict_proba(_post_X(lp[te], sc_te, pos))[:, 1]
+            allc = _college_scores(d, drafted, cm) if use_c else None
+            post[(pos, cut)] = _stack().fit(_post_X(lp, allc, pos), y)
+            u = ~drafted
+            dr = drafted
+            val.append({'pos': pos, 'stage': 'post', 'cut': cut, 'uses_college_score': use_c,
+                        'hit_auc': round(roc_auc_score(y[dr], oof[dr]), 3),
+                        'udfa_n': int(u.sum()), 'udfa_events': int(y[u].sum()),
+                        'udfa_rate': round(y[u].mean(), 3) if u.any() else None,
+                        'udfa_auc': round(roc_auc_score(y[u], oof[u]), 3) if 0 < y[u].sum() < u.sum() else None,
+                        'drafted_rate': round(y[dr].mean(), 3), 'hit_n': int(dr.sum()), 'hits': int(y[dr].sum())})
     return post, pd.DataFrame(val)
 
 
-def score_post(post, fitted, df):
-    """Post-draft hit odds for rows with a draft pick."""
+def score_post(post, fitted, df, tiers=None):
+    """Post-draft odds for drafted rows (their pick) and signed undrafted rows (pick 300).
+    post_hit_pct = hit line; RB/WR also post_top12/24/36 and post_tier1/2/3."""
     out = add_derived(df)
-    out['post_hit_pct'] = np.nan
-    for pos, st in post.items():
-        m = (out.pos == pos) & out.pick.notna()
-        if not m.any():
+    ok = out.pick.notna() | (out.get('udfa_signed', 0) == 1)
+    for pos in ['QB', 'RB', 'WR', 'TE']:
+        m = (out.pos == pos) & ok
+        if not m.any() or (pos, _post_cuts(pos)[0]) not in post:
             continue
-        hm = fitted[(pos, 'base')]['hit']
-        college = hm['model'].predict_proba(out.loc[m, hm['cols']])[:, 1]
-        out.loc[m, 'post_hit_pct'] = st.predict_proba(_post_X(np.log(out.loc[m, 'pick'].values), college, pos))[:, 1]
+        lp = np.log(out.loc[m, 'pick'].fillna(UDFA_PICK).values)
+        ps = []
+        for cut in _post_cuts(pos):
+            cm = _college_model(fitted, tiers, pos, cut)
+            college = cm['model'].predict_proba(out.loc[m, cm['cols']])[:, 1] if POST_COLLEGE[pos] else None
+            ps.append(post[(pos, cut)].predict_proba(_post_X(lp, college, pos))[:, 1])
+        ps = np.maximum.accumulate(np.column_stack(ps), axis=1)
+        if pos in TIER_POS:
+            for k, cut in enumerate(TIER_CUTS):
+                out.loc[m, f'post_top{cut}'] = ps[:, k]
+            out.loc[m, 'post_hit_pct'] = ps[:, 1]
+        else:
+            out.loc[m, 'post_hit_pct'] = ps[:, 0]
+    if 'post_top12' in out:
+        out['post_tier1'] = out.post_top12
+        out['post_tier2'] = out.post_top24 - out.post_top12
+        out['post_tier3'] = out.post_top36 - out.post_top24
     return out
 
 

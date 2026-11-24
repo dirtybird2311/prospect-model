@@ -27,11 +27,14 @@ def lookback(pool, season):
         return None, None
     train = pool[pool.draft_year < season]
     fitted, _, _ = M.fit_all(train)
-    post, _ = M.fit_post(train, fitted)
+    tiers, _ = M.fit_tiers(train, fitted)
+    post, _ = M.fit_post(train, fitted, tiers)
     cls = pool[pool.draft_year == season].copy()
     cls['at_combine'] = 0
-    sc = M.score(fitted, cls)
-    sc['post_hit_pct'] = M.score_post(post, fitted, cls)['post_hit_pct'].values
+    sc = M.score_tiers(tiers, M.score(fitted, cls))
+    ps = M.score_post(post, fitted, cls, tiers)
+    for c in ['post_hit_pct', 'post_top12', 'post_top24', 'post_top36', 'post_tier1', 'post_tier2', 'post_tier3']:
+        sc[c] = ps[c].values if c in ps else np.nan
 
     st = pd.read_csv(path, low_memory=False)
     st = st[st.position.isin(POS)].copy()
@@ -44,7 +47,7 @@ def lookback(pool, season):
     sc['pick_rank'] = sc[sc.drafted == 1].groupby('pos').pick.rank(method='first')
     cut = sc.pos.map(HIT_CUT)
     sc['status'] = np.select(
-        [sc.drafted != 1, sc.nfl_rank.isna(), sc.nfl_rank <= cut, sc.nfl_rank <= cut * 2.5],
+        [(sc.drafted != 1) & (sc.udfa_signed != 1), sc.nfl_rank.isna(), sc.nfl_rank <= cut, sc.nfl_rank <= cut * 2.5],
         ['Not drafted', 'No stats yet', 'On hit pace', 'Contributing'], 'Not producing')
 
     summ = []
