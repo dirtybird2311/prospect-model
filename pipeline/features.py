@@ -118,7 +118,8 @@ def match_draft(cs):
                 continue
         pid = cand.assign(o=cand.tok.map(lambda t: len(t & ctok))).sort_values(['o', 'season', 'games'], ascending=False).player_id.iloc[0]
         rows.append({'player_id': pid, 'draft_year': p.season, 'pick': p.pick, 'gsis_id': p.gsis_id,
-                     'nfl_pos': p.position, 'seasons_started': p.seasons_started, 'draft_name': p.pfr_player_name})
+                     'nfl_pos': p.position, 'seasons_started': p.seasons_started, 'draft_name': p.pfr_player_name,
+                     'team': p.team})
     m = pd.DataFrame(rows).drop_duplicates('player_id')
     print(f'matched {len(m)} of {len(dp)} drafted QB/RB/WR/TE to college stats')
     return m
@@ -202,6 +203,7 @@ def build_pools(cs):
         r['drafted'] = int(is_drafted)
         r['pick'] = dmap.loc[pid, 'pick'] if is_drafted else np.nan
         r['gsis_id'] = dmap.loc[pid, 'gsis_id'] if is_drafted else None
+        r['draft_team'] = dmap.loc[pid, 'team'] if (is_drafted and 'team' in dmap.columns) else None
         r['seasons_started'] = dmap.loc[pid, 'seasons_started'] if is_drafted else np.nan
         rows.append(r)
     pool = pd.DataFrame(rows)
@@ -219,13 +221,19 @@ def build_pools(cs):
     st['rank'] = st.groupby(['season', 'position']).pts.rank(ascending=False, method='first')
     st['startable'] = st['rank'] <= st.position.map(HIT_CUT)
     last_nfl = max(NFL_STAT_SEASONS)
+    # points at the hit line (RB24, WR24, QB12, TE12) each season, so a season can be scored relative to it
+    cutpts = st[st['rank'] == st.position.map(HIT_CUT)].set_index(['season', 'position']).pts
+    st['rel'] = st.pts / st.set_index(['season', 'position']).index.map(cutpts).values
     hits = []
     for _, r in pool[pool.drafted == 1].iterrows():
         s = st[(st.player_id == r.gsis_id) & st.season.between(r.draft_year, r.draft_year + HIT_WINDOW - 1)]
-        hits.append((r.player_id, int(s.startable.any()), s['rank'].min() if len(s) else np.nan))
-    h = pd.DataFrame(hits, columns=['player_id', 'hit', 'best_rank'])
+        first = s[s.startable].season.min() if s.startable.any() else np.nan
+        hits.append((r.player_id, int(s.startable.any()), s['rank'].min() if len(s) else np.nan,
+                     s.rel.max() if len(s) else 0.0, first - r.draft_year + 1 if first == first else np.nan))
+    h = pd.DataFrame(hits, columns=['player_id', 'hit', 'best_rank', 'best_rel', 'yrs_to_hit'])
     pool = pool.merge(h, on='player_id', how='left')
     pool['hit_complete'] = pool.draft_year + HIT_WINDOW - 1 <= last_nfl   # full window observed
+    pool['seasons_obs'] = (last_nfl - pool.draft_year + 1).clip(upper=HIT_WINDOW)   # NFL seasons seen so far
 
     # ---- current prospects ----
     eligible = cs[(cs.season == PROSPECT_SEASON)].player_id.unique()
@@ -254,4 +262,9 @@ def build_pools(cs):
     pros = pd.DataFrame(prow).merge(cb, on='player_id', how='left')
     pros.loc[pros.combine_year != pros.draft_year, ['forty', 'vertical', 'broad_jump', 'cone', 'speed_score', 'c_wt']] = np.nan
     pros['at_combine'] = (pros.combine_year == pros.draft_year).astype(int)
+    # transfer: played for more than one school through his final season (WR/TE transfers hit less, Nov 2026 test)
+    for df in (pool, pros):
+        m = df[['player_id', 'final_season']].merge(cs[['player_id', 'season', 'team']], on='player_id')
+        n = m[m.season <= m.final_season].groupby('player_id').team.nunique()
+        df['transfer'] = (df.player_id.map(n) > 1).astype(int)
     return pool, pros, conf_rate

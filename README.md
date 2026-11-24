@@ -28,28 +28,28 @@ Outputs in `out/`: `prospects.json`, `validation.json`, `weights.json`, `backtes
 | Draft odds | Every FBS QB/RB/WR/TE with a real role whose college career ended 2014–2025 | Drafted or not |
 | Hit odds | Players drafted 2015–2021 (full 5-year window) | Top-N season within 5 years |
 
-Both are per-position L2 logistic regressions on standardized inputs, regularization chosen by leave-one-draft-class-out AUC.
+Draft odds: per-position L2 logistic regression. Hit odds: RB uses L2 logistic regression on hit/miss; QB, WR and TE use ridge regression on log best-season points relative to the hit line (RB24/WR24/QB12/TE12), calibrated to hit odds, and also train on 2022–2024 draftees using their best season so far (validated on 2015–2021 only). Regularization chosen by leave-one-draft-class-out AUC. Final hit % is recalibrated (Platt scaling) only where that improves the Brier score by 2%+, currently TE after the combine.
 
 **Inputs:** per-game production, team shares (yards, catches, TDs), efficiency, best season share, breakout timing, conference strength (drafted skill players per team-season), estimated age at draft (from first roster year; ~0.6 yr mean error vs real birth dates), redshirt status, height, weight.
 
-**Conference adjustment (WR/TE):** production × conference strength. **Advanced stats (from play-by-play, `pipeline/advanced.py`):** RB rushing success rate and first downs per carry (hit model); TE receiving yards/game vs Power defenses (both models). Explosive rate, 3rd-down and red-zone share, yards per target and competitive-game production were tested and left out.
+**Conference adjustment (WR/TE):** production × conference strength. **Transfer flag (WR/TE):** played for more than one school. **Advanced stats (from play-by-play, `pipeline/advanced.py`):** RB rushing success rate and first downs per carry (hit model); TE receiving yards/game vs Power defenses (both models). Explosive rate, 3rd-down and red-zone share, yards per target and competitive-game production were tested and left out.
 
 **Combine stage:** once a prospect has combine results (nflverse updates in early March), he's scored with models that add combine invite and athletic testing. No recruiting rankings: the data source doesn't include them.
 
-**Post-draft stage:** once a player is drafted, hit odds come from draft slot plus his college hit score (QB, RB) or draft slot alone (WR, TE, where the college score added nothing on top of draft slot). Used by the lookback, and for the board after each April draft. Tested and left out: explosive-run rate, drafted RB teammates, committee-back flags.
+**Post-draft stage:** once a player is drafted, hit odds come from draft slot plus his college hit score (QB, RB) or draft slot alone (WR, TE, where the college score added nothing on top of draft slot). Used by the lookback, and for the board after each April draft. Tested and left out: explosive-run rate, drafted RB teammates, committee-back flags, landing spot (`pipeline/landing.py`: vacated opportunity, team offense) and real birth dates. Also tested and left out elsewhere: QB athletic testing.
 
 **Lookback (`pipeline/lookback.py`):** scores the most recent draft class with models refit without it, next to its draft slots and current-season half-PPR results.
 
 ## Validation (leave-one-draft-class-out)
 
-Run `python3 run.py` to reprint. As of Nov 21, 2026:
+Run `python3 run.py` to reprint. As of Nov 23, 2026:
 
 | Pos | Draft AUC | Hit AUC (drafted) | Top vs bottom quarter of drafted players |
 |---|---|---|---|
-| QB | 0.91 | 0.75 | 47% vs 5% |
-| RB | 0.93 | 0.76 | 57% vs 6% |
-| WR | 0.91 | 0.63 | 28% vs 9% |
-| TE | 0.88 | 0.61 (0.77 with combine) | 38% vs 5% |
+| QB | 0.91 | 0.79 (0.81 with combine) | 53% vs 5% |
+| RB | 0.93 | 0.76 (0.76 with combine) | 54% vs 6% |
+| WR | 0.91 | 0.70 (0.71 with combine) | 28% vs 8% |
+| TE | 0.87 | 0.68 (0.76 with combine) | 38% vs 4% |
 
 Post-draft hit accuracy (drafted 2015–2021, nested leave-one-class-out): QB 0.90 (draft slot alone 0.89), RB 0.85 (0.83), WR 0.83, TE 0.86.
 

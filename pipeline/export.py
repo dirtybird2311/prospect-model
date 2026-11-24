@@ -19,7 +19,7 @@ LABELS = {'any_a': 'Adjusted yards per attempt', 'cmp_pct': 'Completion %', 'pas
           'rush_yds_pg_x_conf': 'Rushing yards/game x conference strength', 'scrim_pg_x_conf': 'Scrimmage yards/game x conference strength',
           'rec_share_x_conf': 'Share of team catches x conference strength',
           'rush_success': 'Rushing success rate', 'fd_per_carry': 'First downs per carry',
-          'rec_ypg_vs_power': 'Receiving yards/game vs Power defenses'}
+          'rec_ypg_vs_power': 'Receiving yards/game vs Power defenses', 'transfer': 'Transferred'}
 
 
 def _code():
@@ -60,7 +60,7 @@ def export(scored, val, back, w, run_at):
     keep = ['player_id', 'rank', 'name', 'pos', 'college_team', 'conference', 'final_season', 'used_prior_season',
             'est_draft_age', 'rush_success', 'fd_per_carry', 'rec_ypg_vs_power', 'tgt_success', 'rec_explosive', 'yds_per_tgt', 'p_draft', 'p_hit_given_draft', 'hit_pct', 'model_score', 'stage', 'key_stats', 'games']
     _write('prospects', s[keep].sort_values(['pos', 'rank']), src + [
-        {'label': 'Definitions', 'value': 'Hit % = draft odds x hit odds if drafted. A hit is a top-24 RB/WR or top-12 QB/TE half-PPR season within his first 5 NFL seasons. Model score = percentile of hit % among current prospects at his position. Draft odds treat this season as his last in college.'}] + code)
+        {'label': 'Definitions', 'value': 'Hit % = draft odds x hit odds if drafted (recalibrated to backtest hit rates only where that clearly improved accuracy: TEs once combine results are in). QB/WR/TE hit odds come from a model of best-season fantasy points, RB hit odds from a hit/miss model. A hit is a top-24 RB/WR or top-12 QB/TE half-PPR season within his first 5 NFL seasons. Model score = percentile of hit % among current prospects at his position. Draft odds treat this season as his last in college.'}] + code)
 
     v = val.copy()
     v['stage_label'] = v.stage.map({'base': 'College stats', 'combine': 'Stats + combine', 'post': 'Post-draft (draft slot + college score)'})
@@ -69,12 +69,12 @@ def export(scored, val, back, w, run_at):
         if c in v:
             v[c] = (v[c] * 100).round(1)
     _write('validation', v, src + [
-        {'label': 'Method', 'value': 'Leave-one-draft-class-out: each class is scored by models fit on the others. Draft model: every FBS QB/RB/WR/TE with a real role whose college career ended 2014-2025. Hit model: drafted players from 2015-2021 (full 5-year window). AUC = chance a random hit is ranked above a random miss (0.5 = coin flip). Quarter hit rates are among drafted players, ranked by hit %.'}] + code)
+        {'label': 'Method', 'value': 'Leave-one-draft-class-out: each class is scored by models fit on the others. Draft model: every FBS QB/RB/WR/TE with a real role whose college career ended 2014-2025. Hit model: drafted players from 2015-2021 (full 5-year window); QB/WR/TE hit models also train on 2022-2024 draftees using their best season so far, and are scored only on 2015-2021. AUC = chance a random hit is ranked above a random miss (0.5 = coin flip). Quarter hit rates are among drafted players, ranked by hit %.'}] + code)
 
     w = w[(w.stage == 'base')].copy()
     w['feature_label'] = w.feature.map(LABELS).fillna(w.feature)
     w['id'] = w.pos + '-' + w.model + '-' + w.feature
-    _write('weights', w, src + [{'label': 'Units', 'value': 'Standardized logistic-regression weights (log-odds per standard deviation). Positive helps. Correlated inputs share credit.'}] + code)
+    _write('weights', w, src + [{'label': 'Units', 'value': 'Standardized weights per standard deviation of each input. Draft model and RB hit model: logistic-regression log-odds. QB/WR/TE hit models: ridge regression on log best-season points relative to the hit line. Positive helps. Correlated inputs share credit.'}] + code)
 
     b = back.copy()
     b['id'] = b.player_id.astype(str)
