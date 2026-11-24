@@ -19,11 +19,11 @@ LABELS = {'any_a': 'Adjusted yards per attempt', 'cmp_pct': 'Completion %', 'pas
           'rush_yds_pg_x_conf': 'Rushing yards/game x conference strength', 'scrim_pg_x_conf': 'Scrimmage yards/game x conference strength',
           'rec_share_x_conf': 'Share of team catches x conference strength',
           'rush_success': 'Rushing success rate', 'fd_per_carry': 'First downs per carry',
-          'rec_ypg_vs_power': 'Receiving yards/game vs Power defenses', 'transfer': 'Transferred'}
+          'rec_ypg_vs_power': 'Receiving yards/game vs Power defenses', 'transfer': 'Transferred', 'recruit_rating': 'Recruiting rating (247 Composite)', 'unrated': 'Unrated as a recruit'}
 
 
 def _code():
-    files = ['config.py', 'fetch.py', 'college.py', 'features.py', 'advanced.py', 'models.py', 'lookback.py', 'export.py']
+    files = ['config.py', 'fetch.py', 'college.py', 'features.py', 'advanced.py', 'recruiting.py', 'landing.py', 'models.py', 'lookback.py', 'export.py']
     return [{'label': f, 'value': (ROOT / 'pipeline' / f).read_text(), 'type': 'code', 'lang': 'python'} for f in files]
 
 
@@ -48,6 +48,7 @@ def key_stats(r):
 def export(scored, val, back, w, run_at):
     src = [{'label': 'College stats', 'value': f'sportsdataverse/cfbfastR-data player_stats + rosters, 2014-{PROSPECT_SEASON} (current season through the latest weekly update). Some bowl and playoff games are missing.'},
            {'label': 'NFL data', 'value': 'nflverse draft_picks, combine, stats_player_reg'},
+           {'label': 'Recruiting', 'value': '247Sports Composite ratings via CollegeFootballData.com, 2010-2026 high-school classes (scripts/fetch_recruiting.py)'},
            {'label': 'Run at', 'value': run_at}]
     code = _code()
 
@@ -58,7 +59,7 @@ def export(scored, val, back, w, run_at):
         s[c] = (s[c] * 100).round(1)
     s['player_id'] = s.player_id.astype(str)
     keep = ['player_id', 'rank', 'name', 'pos', 'college_team', 'conference', 'final_season', 'used_prior_season',
-            'est_draft_age', 'rush_success', 'fd_per_carry', 'rec_ypg_vs_power', 'tgt_success', 'rec_explosive', 'yds_per_tgt', 'p_draft', 'p_hit_given_draft', 'hit_pct', 'model_score', 'stage', 'key_stats', 'games']
+            'est_draft_age', 'recruit_rating', 'recruit_stars', 'unrated', 'rush_success', 'fd_per_carry', 'rec_ypg_vs_power', 'tgt_success', 'rec_explosive', 'yds_per_tgt', 'p_draft', 'p_hit_given_draft', 'hit_pct', 'model_score', 'stage', 'key_stats', 'games']
     _write('prospects', s[keep].sort_values(['pos', 'rank']), src + [
         {'label': 'Definitions', 'value': 'Hit % = draft odds x hit odds if drafted (recalibrated to backtest hit rates only where that clearly improved accuracy: TEs once combine results are in). QB/WR/TE hit odds come from a model of best-season fantasy points, RB hit odds from a hit/miss model. A hit is a top-24 RB/WR or top-12 QB/TE half-PPR season within his first 5 NFL seasons. Model score = percentile of hit % among current prospects at his position. Draft odds treat this season as his last in college.'}] + code)
 

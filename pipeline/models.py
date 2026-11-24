@@ -47,8 +47,12 @@ COMBINE = {
 
 # Advanced stats (pipeline/advanced.py), added separately to the draft and hit models where the backtest improved.
 # Kept Nov 21, 2026 after testing all seven advanced stats one at a time and in combination.
-ADV_DRAFT = {'QB': [], 'RB': [], 'WR': [], 'TE': ['rec_ypg_vs_power']}
-ADV_HIT = {'QB': [], 'RB': ['rush_success', 'fd_per_carry'], 'WR': [], 'TE': ['rec_ypg_vs_power']}
+# Recruiting (247 Composite rating, pipeline/recruiting.py), added Nov 23, 2026: helped RB draft and hit models
+# (hit AUC .758 -> .775) and the WR hit model with an unrated flag (.703 -> .710); not QB or TE, and nothing
+# post-draft (draft slot already prices it in).
+ADV_DRAFT = {'QB': [], 'RB': ['recruit_rating'], 'WR': [], 'TE': ['rec_ypg_vs_power']}
+ADV_HIT = {'QB': [], 'RB': ['rush_success', 'fd_per_carry', 'recruit_rating'], 'WR': ['recruit_rating', 'unrated'],
+           'TE': ['rec_ypg_vs_power']}
 
 
 def feats(pos, stage, kind='hit'):

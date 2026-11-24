@@ -10,7 +10,7 @@ Results feed the **2027 Prospect Odds** dashboard: https://claude.ai/artifact/KU
 
 ```
 pip install -r requirements.txt
-python3 run.py            # downloads data (~1 GB first time), fits, scores, writes out/*.json
+python3 run.py            # downloads data (recruiting CSVs come from the GitHub Action) (~1 GB first time), fits, scores, writes out/*.json
 python3 run.py --no-fetch # reuse downloaded files
 ```
 
@@ -32,9 +32,9 @@ Draft odds: per-position L2 logistic regression. Hit odds: RB uses L2 logistic r
 
 **Inputs:** per-game production, team shares (yards, catches, TDs), efficiency, best season share, breakout timing, conference strength (drafted skill players per team-season), estimated age at draft (from first roster year; ~0.6 yr mean error vs real birth dates), redshirt status, height, weight.
 
-**Conference adjustment (WR/TE):** production × conference strength. **Transfer flag (WR/TE):** played for more than one school. **Advanced stats (from play-by-play, `pipeline/advanced.py`):** RB rushing success rate and first downs per carry (hit model); TE receiving yards/game vs Power defenses (both models). Explosive rate, 3rd-down and red-zone share, yards per target and competitive-game production were tested and left out.
+**Conference adjustment (WR/TE):** production × conference strength. **Transfer flag (WR/TE):** played for more than one school. **Recruiting (`pipeline/recruiting.py`):** 247Sports Composite rating, pulled from CollegeFootballData.com by the "Pull recruiting rankings" GitHub Action (needs a `CFBD_API_KEY` repository secret) into `data/recruiting/`. Matched by CFBD athlete id, else name + school + class year. Used in the RB draft and hit models and the WR hit model (with an unrated flag); no help for QB, TE or post-draft. **Advanced stats (from play-by-play, `pipeline/advanced.py`):** RB rushing success rate and first downs per carry (hit model); TE receiving yards/game vs Power defenses (both models). Explosive rate, 3rd-down and red-zone share, yards per target and competitive-game production were tested and left out.
 
-**Combine stage:** once a prospect has combine results (nflverse updates in early March), he's scored with models that add combine invite and athletic testing. No recruiting rankings: the data source doesn't include them.
+**Combine stage:** once a prospect has combine results (nflverse updates in early March), he's scored with models that add combine invite and athletic testing. 
 
 **Post-draft stage:** once a player is drafted, hit odds come from draft slot plus his college hit score (QB, RB) or draft slot alone (WR, TE, where the college score added nothing on top of draft slot). Used by the lookback, and for the board after each April draft. Tested and left out: explosive-run rate, drafted RB teammates, committee-back flags, landing spot (`pipeline/landing.py`: vacated opportunity, team offense) and real birth dates. Also tested and left out elsewhere: QB athletic testing.
 
@@ -47,8 +47,8 @@ Run `python3 run.py` to reprint. As of Nov 23, 2026:
 | Pos | Draft AUC | Hit AUC (drafted) | Top vs bottom quarter of drafted players |
 |---|---|---|---|
 | QB | 0.91 | 0.79 (0.81 with combine) | 53% vs 5% |
-| RB | 0.93 | 0.76 (0.76 with combine) | 54% vs 6% |
-| WR | 0.91 | 0.70 (0.71 with combine) | 28% vs 8% |
+| RB | 0.94 | 0.78 (0.77 with combine) | 60% vs 3% |
+| WR | 0.91 | 0.71 (0.71 with combine) | 36% vs 8% |
 | TE | 0.87 | 0.68 (0.76 with combine) | 38% vs 4% |
 
 Post-draft hit accuracy (drafted 2015–2021, nested leave-one-class-out): QB 0.90 (draft slot alone 0.89), RB 0.85 (0.83), WR 0.83, TE 0.86.

@@ -12,6 +12,7 @@ from pipeline.fetch import fetch_all
 from pipeline.college import build_college
 from pipeline.features import build_pools
 from pipeline.advanced import build_advanced, attach
+from pipeline.recruiting import recruit_table, attach_recruiting
 from pipeline.models import fit_all, fit_post, score, weights
 import pandas as pd
 from pipeline.export import export, export_lookback
@@ -26,6 +27,8 @@ def main():
     pool, pros, conf = build_pools(cs)
     adv = build_advanced()
     pool, pros = attach(pool, adv), attach(pros, adv)
+    rt = recruit_table(cs)
+    pool, pros = attach_recruiting(pool, rt), attach_recruiting(pros, rt)
     fitted, val, back = fit_all(pool)
     post, post_val = fit_post(pool, fitted)
     print(post_val.to_string(index=False))
