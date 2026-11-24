@@ -1,4 +1,5 @@
-data/
+data/*
+!data/recruiting/
 out/
 __pycache__/
 *.pyc
