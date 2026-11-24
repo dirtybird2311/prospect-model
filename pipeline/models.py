@@ -262,11 +262,18 @@ def score(fitted, pros):
 
 
 # ---------------- fantasy tiers (RB, WR) ----------------
-# P(best season within 5 years reaches the top 12 / top 24 / top 36 at his position | drafted): RB1, RB2, flex
-# in a 12-team league. Each line gets its own hit model (RB: logistic on that line; WR: the points model with a
-# calibrator for that line). Leave-one-class-out AUC, Nov 23, 2026: RB .814/.775/.763, WR .703/.710/.686.
+# Odds a player's best season in his first five reaches the top 12 / 13-24 / 25-36 at his position (RB1-WR1 /
+# RB2-WR2 / flex, 12-team league). One points model per position gives the shape (a calibrator per line), scaled
+# so the top-24 line equals the player's hit %; that keeps the tiers in order and consistent with hit %.
 TIER_CUTS = [12, 24, 36]
 TIER_POS = ['RB', 'WR']
+
+
+def _fit_line(d, x, cols, cut, a):
+    dd = d.assign(hit=(d.best_rank <= cut).fillna(False).astype(int))
+    raw = _points_raw_oof(dd, x, cols, a)
+    cal = LogisticRegression(max_iter=5000).fit(raw.reshape(-1, 1), dd.hit.values)
+    return dd.hit.values, raw, cal
 
 
 def fit_tiers(pool, fitted):
@@ -278,30 +285,46 @@ def fit_tiers(pool, fitted):
         d = dp[(dp.drafted == 1) & dp.hit_complete].reset_index(drop=True)
         x = dp[(dp.drafted == 1) & ~dp.hit_complete & (dp.seasons_obs >= MIN_PARTIAL_SEASONS)].reset_index(drop=True)
         for stage in ['base', 'combine']:
-            cols = fitted[(pos, stage)]['hit']['cols']
+            hm = fitted[(pos, stage)]['hit']
+            cols = hm['cols']
+            y24 = (d.best_rank <= 24).fillna(False).astype(int).values
+            a = max(ALPHA_GRID, key=lambda a: roc_auc_score(y24, _points_raw_oof(d, x, cols, a)))
+            tr = pd.concat([d, x], ignore_index=True)
+            reg = _ridge(a).fit(tr[cols], _points_y(tr))
+            lines, oofp = {}, {}
             for cut in TIER_CUTS:
-                dd = d.assign(hit=(d.best_rank <= cut).astype(int))
-                xx = x.assign(hit=(x.best_rank <= cut).astype(int))
-                m = fitted[(pos, stage)]['hit'] if cut == 24 else _fit_hit(dd, xx, cols, pos)
-                tiers[(pos, stage, cut)] = m
-                val.append({'pos': pos, 'stage': stage, 'cut': cut, 'auc': round(m['auc'], 3),
-                            'drafted_rate': round(dd.hit.mean(), 3), 'n': len(dd)})
+                y, raw, cal = _fit_line(d, x, cols, cut, a)
+                lines[cut] = cal
+                oofp[cut] = cal.predict_proba(raw.reshape(-1, 1))[:, 1]
+            o = np.maximum.accumulate(np.column_stack([oofp[c] for c in TIER_CUTS]), axis=1)
+            for k, cut in enumerate(TIER_CUTS):   # composite out-of-fold odds, as scored: hit % x shape
+                comp = hm['oof'] * o[:, k] / np.maximum(o[:, 1], 1e-6)
+                y = (d.best_rank <= cut).fillna(False).astype(int).values
+                val.append({'pos': pos, 'stage': stage, 'cut': cut, 'auc': round(roc_auc_score(y, comp), 3),
+                            'drafted_rate': round(y.mean(), 3), 'n': len(d)})
+            tiers[(pos, stage)] = {'reg': reg, 'lines': lines, 'cols': cols}
+            # per-line hit-model views for the post-draft step's college score
+            for cut in TIER_CUTS:
+                tiers[(pos, stage, cut)] = {'model': PointsHit(reg, lines[cut]), 'cols': cols, 'C': a, 'kind': 'points',
+                                            'extra': x, 'auc': None, 'cut': cut}
     return tiers, pd.DataFrame(val)
 
 
 def score_tiers(tiers, scored):
-    """Adds p_top12/24/36 (probability incl. draft odds) and exclusive tier odds for RB/WR rows of `scored`."""
+    """Adds p_top12/24/36 and tier1/2/3 (all including draft odds) for RB/WR rows; p_top24 equals hit %."""
     out = add_derived(scored)
     for pos in TIER_POS:
         for stage in ['base', 'combine']:
             m = (out.pos == pos) & (out.stage == stage)
-            if not m.any() or (pos, stage, 24) not in tiers:
+            if not m.any() or (pos, stage) not in tiers:
                 continue
-            p = np.column_stack([tiers[(pos, stage, c)]['model'].predict_proba(out.loc[m, tiers[(pos, stage, c)]['cols']])[:, 1]
-                                 for c in TIER_CUTS])
-            p = np.maximum.accumulate(p, axis=1)          # top-12 <= top-24 <= top-36
-            for i, c in enumerate(TIER_CUTS):
-                out.loc[m, f'p_top{c}'] = out.loc[m, 'p_draft'].values * p[:, i]
+            t = tiers[(pos, stage)]
+            raw = t['reg'].predict(out.loc[m, t['cols']]).reshape(-1, 1)
+            p = np.maximum.accumulate(np.column_stack([t['lines'][c].predict_proba(raw)[:, 1] for c in TIER_CUTS]), axis=1)
+            shape = p / np.maximum(p[:, [1]], 1e-6)
+            hp = out.loc[m, 'hit_pct'].values
+            for k, c in enumerate(TIER_CUTS):
+                out.loc[m, f'p_top{c}'] = np.minimum(hp * shape[:, k], out.loc[m, 'p_draft'].values)
     if 'p_top12' in out:
         out['tier1'] = out.p_top12
         out['tier2'] = out.p_top24 - out.p_top12
@@ -310,10 +333,11 @@ def score_tiers(tiers, scored):
 
 
 # ---------------- post-draft stage ----------------
-# Once a player is drafted, hit odds = f(draft slot, college hit score). Tested Nov 22, 2026 (nested leave-one-class-out):
-# the college score added to draft slot for QB (AUC .893 -> .902) and RB (.834 -> .849) but not WR (.831 -> .801)
-# or TE (.860 -> .856), so WR/TE post-draft odds use draft slot alone. Explosive-run rate, drafted RB teammates and
-# committee-back flags were also tested and left out.
+# Once a player is drafted (or signs as an undrafted free agent), hit odds = f(draft slot, college hit score).
+# Tested Nov 22, 2026 (nested leave-one-class-out): the college score added to draft slot for QB (AUC .893 -> .902)
+# and RB (.834 -> .849) but not WR (.831 -> .801) or TE (.860 -> .856), so WR/TE post-draft odds use draft slot
+# alone. Explosive-run rate, drafted RB teammates, committee-back flags, landing spot (vacated opportunity, team
+# offense) and real birth dates were also tested and left out.
 POST_COLLEGE = {'QB': True, 'RB': True, 'WR': False, 'TE': False}
 
 
