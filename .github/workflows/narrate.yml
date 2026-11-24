@@ -1,7 +1,7 @@
 name: Narrate a script
 
 # Run by hand from the Actions tab. Turns a narration/scripts/*.json file into voice clips with the
-# open-source Kokoro model and attaches them to the run as a downloadable artifact.
+# open-source Kokoro model and saves them to the narration-output branch.
 on:
   workflow_dispatch:
     inputs:
@@ -10,7 +10,7 @@ on:
         default: sample_rb1
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   narrate:
@@ -27,7 +27,11 @@ jobs:
           pip install -q "kokoro>=0.9.2" soundfile
       - name: Narrate
         run: python3 narration/narrate.py "narration/scripts/${{ inputs.script }}.json" "narration/out/${{ inputs.script }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: narration-${{ inputs.script }}
-          path: narration/out/${{ inputs.script }}
+      - name: Save the clips to the narration-output branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B narration-output
+          git add -f "narration/out/${{ inputs.script }}"
+          git commit -m "Narration clips: ${{ inputs.script }}"
+          git push -f origin narration-output
