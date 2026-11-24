@@ -265,7 +265,10 @@ def score(fitted, pros):
 # Odds a player's best season in his first five reaches the top 12 / 13-24 / 25-36 at his position (RB1-WR1 /
 # RB2-WR2 / flex, 12-team league). One points model per position gives the shape (a calibrator per line), scaled
 # so the top-24 line equals the player's hit %; that keeps the tiers in order and consistent with hit %.
-TIER_CUTS = [12, 24, 36]
+# Lines fit Brandon's lineup (12 teams; 2 RB, 3 WR, 1 TE, 2 flex). Across 2015-2025 the 24 flex spots went to
+# about 12.5 RBs, 11 WRs and 0.5 TEs a season, so starters run to about RB36 and WR47.
+TIER_CUTS = {'RB': [12, 24, 36], 'WR': [12, 24, 36, 47]}
+TIER_LABELS = {'RB': ['RB1', 'RB2', 'Flex'], 'WR': ['WR1', 'WR2', 'WR3', 'Flex']}
 TIER_POS = ['RB', 'WR']
 
 
@@ -292,19 +295,21 @@ def fit_tiers(pool, fitted):
             tr = pd.concat([d, x], ignore_index=True)
             reg = _ridge(a).fit(tr[cols], _points_y(tr))
             lines, oofp = {}, {}
-            for cut in TIER_CUTS:
+            cuts = TIER_CUTS[pos]
+            i24 = cuts.index(24)
+            for cut in cuts:
                 y, raw, cal = _fit_line(d, x, cols, cut, a)
                 lines[cut] = cal
                 oofp[cut] = cal.predict_proba(raw.reshape(-1, 1))[:, 1]
-            o = np.maximum.accumulate(np.column_stack([oofp[c] for c in TIER_CUTS]), axis=1)
-            for k, cut in enumerate(TIER_CUTS):   # composite out-of-fold odds, as scored: hit % x shape
-                comp = hm['oof'] * o[:, k] / np.maximum(o[:, 1], 1e-6)
+            o = np.maximum.accumulate(np.column_stack([oofp[c] for c in cuts]), axis=1)
+            for k, cut in enumerate(cuts):   # composite out-of-fold odds, as scored: hit % x shape
+                comp = hm['oof'] * o[:, k] / np.maximum(o[:, i24], 1e-6)
                 y = (d.best_rank <= cut).fillna(False).astype(int).values
                 val.append({'pos': pos, 'stage': stage, 'cut': cut, 'auc': round(roc_auc_score(y, comp), 3),
                             'drafted_rate': round(y.mean(), 3), 'n': len(d)})
             tiers[(pos, stage)] = {'reg': reg, 'lines': lines, 'cols': cols}
             # per-line hit-model views for the post-draft step's college score
-            for cut in TIER_CUTS:
+            for cut in cuts:
                 tiers[(pos, stage, cut)] = {'model': PointsHit(reg, lines[cut]), 'cols': cols, 'C': a, 'kind': 'points',
                                             'extra': x, 'auc': None, 'cut': cut}
     return tiers, pd.DataFrame(val)
@@ -320,15 +325,26 @@ def score_tiers(tiers, scored):
                 continue
             t = tiers[(pos, stage)]
             raw = t['reg'].predict(out.loc[m, t['cols']]).reshape(-1, 1)
-            p = np.maximum.accumulate(np.column_stack([t['lines'][c].predict_proba(raw)[:, 1] for c in TIER_CUTS]), axis=1)
-            shape = p / np.maximum(p[:, [1]], 1e-6)
+            cuts = TIER_CUTS[pos]
+            p = np.maximum.accumulate(np.column_stack([t['lines'][c].predict_proba(raw)[:, 1] for c in cuts]), axis=1)
+            shape = p / np.maximum(p[:, [cuts.index(24)]], 1e-6)
             hp = out.loc[m, 'hit_pct'].values
-            for k, c in enumerate(TIER_CUTS):
+            for k, c in enumerate(cuts):
                 out.loc[m, f'p_top{c}'] = np.minimum(hp * shape[:, k], out.loc[m, 'p_draft'].values)
-    if 'p_top12' in out:
-        out['tier1'] = out.p_top12
-        out['tier2'] = out.p_top24 - out.p_top12
-        out['tier3'] = out.p_top36 - out.p_top24
+    return _tier_split(out, 'p_top', 'tier')
+
+
+def _tier_split(out, src, dst):
+    """Exclusive tier odds from cumulative ones: dst1 = top 12, dst2 = 13-24, ... per position's lines."""
+    for pos in TIER_POS:
+        m = out.pos == pos
+        prev = 0.0
+        for k, c in enumerate(TIER_CUTS[pos], 1):
+            col = f'{src}{c}'
+            if col not in out:
+                continue
+            out.loc[m, f'{dst}{k}'] = out.loc[m, col] - prev
+            prev = out.loc[m, col]
     return out
 
 
@@ -358,7 +374,7 @@ UDFA_PICK = 300   # undrafted players who sign with a team enter the post-draft 
 
 
 def _post_cuts(pos):
-    return TIER_CUTS if pos in TIER_POS else [12]
+    return TIER_CUTS[pos] if pos in TIER_POS else [12]
 
 
 def _college_model(fitted, tiers, pos, cut):
@@ -435,16 +451,12 @@ def score_post(post, fitted, df, tiers=None):
             ps.append(post[(pos, cut)].predict_proba(_post_X(lp, college, pos))[:, 1])
         ps = np.maximum.accumulate(np.column_stack(ps), axis=1)
         if pos in TIER_POS:
-            for k, cut in enumerate(TIER_CUTS):
+            for k, cut in enumerate(TIER_CUTS[pos]):
                 out.loc[m, f'post_top{cut}'] = ps[:, k]
-            out.loc[m, 'post_hit_pct'] = ps[:, 1]
+            out.loc[m, 'post_hit_pct'] = ps[:, TIER_CUTS[pos].index(24)]
         else:
             out.loc[m, 'post_hit_pct'] = ps[:, 0]
-    if 'post_top12' in out:
-        out['post_tier1'] = out.post_top12
-        out['post_tier2'] = out.post_top24 - out.post_top12
-        out['post_tier3'] = out.post_top36 - out.post_top24
-    return out
+    return _tier_split(out, 'post_top', 'post_tier')
 
 
 def weights(fitted):

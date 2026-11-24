@@ -33,7 +33,7 @@ def lookback(pool, season):
     cls['at_combine'] = 0
     sc = M.score_tiers(tiers, M.score(fitted, cls))
     ps = M.score_post(post, fitted, cls, tiers)
-    for c in ['post_hit_pct', 'post_top12', 'post_top24', 'post_top36', 'post_tier1', 'post_tier2', 'post_tier3']:
+    for c in ['post_hit_pct', 'post_top12', 'post_top24', 'post_top36', 'post_top47', 'post_tier1', 'post_tier2', 'post_tier3', 'post_tier4']:
         sc[c] = ps[c].values if c in ps else np.nan
 
     st = pd.read_csv(path, low_memory=False)
