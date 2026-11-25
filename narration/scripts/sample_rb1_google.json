@@ -1,31 +1,4 @@
 {
- "variants": [
-  {
-   "tag": "g-charon",
-   "voice": "en-US-Chirp3-HD-Charon",
-   "speed": 1.1
-  },
-  {
-   "tag": "g-puck",
-   "voice": "en-US-Chirp3-HD-Puck",
-   "speed": 1.1
-  },
-  {
-   "tag": "g-fenrir",
-   "voice": "en-US-Chirp3-HD-Fenrir",
-   "speed": 1.1
-  },
-  {
-   "tag": "g-orus",
-   "voice": "en-US-Chirp3-HD-Orus",
-   "speed": 1.1
-  },
-  {
-   "tag": "g-kore",
-   "voice": "en-US-Chirp3-HD-Kore",
-   "speed": 1.1
-  }
- ],
  "segments": [
   {
    "id": "hook",
@@ -52,5 +25,7 @@
    "text": "Full board and track record at statable F F dot com."
   }
  ],
- "engine": "google"
+ "engine": "google",
+ "voice": "en-US-Chirp3-HD-Charon",
+ "speed": 1.1
 }
