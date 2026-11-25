@@ -1,0 +1,56 @@
+{
+ "variants": [
+  {
+   "tag": "g-charon",
+   "voice": "en-US-Chirp3-HD-Charon",
+   "speed": 1.1
+  },
+  {
+   "tag": "g-puck",
+   "voice": "en-US-Chirp3-HD-Puck",
+   "speed": 1.1
+  },
+  {
+   "tag": "g-fenrir",
+   "voice": "en-US-Chirp3-HD-Fenrir",
+   "speed": 1.1
+  },
+  {
+   "tag": "g-orus",
+   "voice": "en-US-Chirp3-HD-Orus",
+   "speed": 1.1
+  },
+  {
+   "tag": "g-kore",
+   "voice": "en-US-Chirp3-HD-Kore",
+   "speed": 1.1
+  }
+ ],
+ "segments": [
+  {
+   "id": "hook",
+   "text": "Which college running backs are most likely to become NFL RB1s? Here's what our model says."
+  },
+  {
+   "id": "three",
+   "text": "Number three: J'Koby Williams, Texas Tech. A twenty percent chance at a top twelve season in his first five years."
+  },
+  {
+   "id": "two",
+   "text": "Number two: Jadan Baugh, Florida. Twenty one percent."
+  },
+  {
+   "id": "one",
+   "text": "Number one: Cole Tabb, Cincinnati. Twenty six percent. A hundred thirty one scrimmage yards a game, and he catches passes."
+  },
+  {
+   "id": "context",
+   "text": "Only about one in six drafted running backs ever has an RB1 season."
+  },
+  {
+   "id": "cta",
+   "text": "Full board and track record at statable F F dot com."
+  }
+ ],
+ "engine": "google"
+}

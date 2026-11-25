@@ -1,7 +1,8 @@
 name: Narrate a script
 
-# Run by hand from the Actions tab. Turns a narration/scripts/*.json file into voice clips with the
-# open-source Kokoro model and saves them to the narration-output branch.
+# Run by hand from the Actions tab. Turns a narration/scripts/*.json file into voice clips, with the open-source
+# Kokoro model or Google Text-to-Speech ("engine": "google", needs the GOOGLE_TTS_API_KEY secret), and saves
+# them to the narration-output branch.
 on:
   workflow_dispatch:
     inputs:
@@ -20,13 +21,23 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install
+      - name: Pick the voice engine
+        id: engine
+        run: echo "name=$(python3 -c "import json;print(json.load(open('narration/scripts/${{ inputs.script }}.json')).get('engine','kokoro'))")" >> "$GITHUB_OUTPUT"
+      - name: Install Kokoro
+        if: steps.engine.outputs.name == 'kokoro'
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng
           pip install -q torch --index-url https://download.pytorch.org/whl/cpu
           pip install -q "kokoro>=0.9.2" soundfile
-      - name: Narrate
+      - name: Narrate with Kokoro
+        if: steps.engine.outputs.name == 'kokoro'
         run: python3 narration/narrate.py "narration/scripts/${{ inputs.script }}.json" "narration/out/${{ inputs.script }}"
+      - name: Narrate with Google Text-to-Speech
+        if: steps.engine.outputs.name == 'google'
+        env:
+          GOOGLE_TTS_API_KEY: ${{ secrets.GOOGLE_TTS_API_KEY }}
+        run: python3 narration/narrate_google.py "narration/scripts/${{ inputs.script }}.json" "narration/out/${{ inputs.script }}"
       - name: Save the clips to the narration-output branch
         run: |
           git config user.name "github-actions[bot]"
