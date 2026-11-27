@@ -43,6 +43,7 @@ def main():
     with open(DATA / 'fitted.pkl', 'wb') as f:
         pickle.dump((fitted, post), f)
     pool.to_pickle(DATA / 'pool_adv.pkl')
+    scored.to_pickle(DATA / 'scored.pkl')   # prospects with every model input, for the site build
     print(val[val.stage != 'post'][['pos', 'stage', 'draft_auc', 'hit_auc', 'overall_auc', 'drafted_top_q_hit', 'drafted_bottom_q_hit']].to_string(index=False))
     export(scored, val, back, weights(fitted), datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
     sc, summ = lookback(pool, PROSPECT_SEASON)
