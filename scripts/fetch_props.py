@@ -24,7 +24,7 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parent.parent / 'data' / 'props'
 API = 'https://api.sportsgameodds.com/v2/events'
 BOOKS = ['fanduel', 'caesars']
-DAYS = 8
+DAYS = 8                                          # games kicking off within this many days
 FIELDS = ['event_id', 'kickoff_utc', 'away_team', 'home_team', 'player_id', 'player', 'stat', 'period', 'bet_type',
           'book', 'line', 'over_odds', 'under_odds', 'p_over_novig']
 TEAM_SIDES = {'home', 'away', 'all'}
