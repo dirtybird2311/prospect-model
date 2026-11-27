@@ -168,6 +168,7 @@ def main():
             w = csv.DictWriter(f, fieldnames=FIELDS)
             w.writeheader()
             w.writerows(rows)
+    (OUT / 'status.txt').write_text(f'{stamp} {note}\n')
     print(f'{note}; {len(fill)} games from nflverse; {len(rows)} total -> {OUT}/lines_{stamp}.csv')
     for r in rows:
         print(f"  {r['gameday']} {r['away_team']:>3} @ {r['home_team']:<3} spread {r['spread_home']:+5.1f} total {r['total']:4.1f}  [{r['source']}]")
