@@ -15,6 +15,7 @@ Lines are model inputs only; they are never published on the site.
 import csv
 import io
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -121,6 +122,10 @@ def pinnacle_key():
             return m.group(1)
         if 'arcadia' in js:
             DIAG.append(f'arcadia mentioned in {url.rsplit("/", 1)[-1]}')
+            if os.environ.get('LINES_DEBUG'):
+                snips = [js[max(0, m.start() - 160):m.end() + 160] for m in re.finditer(r'arcadia|api-?key|apikey', js, re.I)][:12]
+                with open(OUT / 'debug.txt', 'a') as f:
+                    f.write(f'== {url}\n' + '\n--\n'.join(snips) + '\n')
         base = url.rsplit('/', 1)[0]
         queue += [c if c.startswith('http') or c.startswith('/') else base + '/' + c
                   for c in re.findall(r'["\']([\w./-]+\.js)["\']', js)][:30]
