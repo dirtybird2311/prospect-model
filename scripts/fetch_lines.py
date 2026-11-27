@@ -94,15 +94,37 @@ def nflverse_lines(games):
 
 
 # ---------------------------------------------------------------- Pinnacle (public website feed)
+KEY_RE = re.compile(r'x-api-key["\']?\s*[:,=]\s*["\']([A-Za-z0-9]{20,})["\']', re.I)
+DIAG = []
+
+
 def pinnacle_key():
+    """The feed key the website itself sends; found in the page or its scripts (and the chunks they load)."""
     page = get(PIN_SITE)
-    scripts = re.findall(r'src="([^"]+\.js)"', page)
-    for s in scripts:
-        url = s if s.startswith('http') else 'https://www.pinnacle.com' + s
-        m = re.search(r'["\']?x-api-key["\']?\s*[:,]\s*["\']([A-Za-z0-9]{20,})["\']', get(url))
+    m = KEY_RE.search(page)
+    if m:
+        return m.group(1)
+    seen, queue = set(), re.findall(r'(?:src|href)=["\']?([^"\'\s>]+\.js)', page)
+    DIAG.append(f'page {len(page)} chars, {len(queue)} scripts, arcadia in page: {"arcadia" in page}')
+    while queue and len(seen) < 40:
+        s = queue.pop(0)
+        url = s if s.startswith('http') else 'https://www.pinnacle.com' + ('' if s.startswith('/') else '/') + s
+        if url in seen:
+            continue
+        seen.add(url)
+        try:
+            js = get(url)
+        except Exception:
+            continue
+        m = KEY_RE.search(js)
         if m:
             return m.group(1)
-    raise RuntimeError('no feed key found on the Pinnacle page')
+        if 'arcadia' in js:
+            DIAG.append(f'arcadia mentioned in {url.rsplit("/", 1)[-1]}')
+        base = url.rsplit('/', 1)[0]
+        queue += [c if c.startswith('http') or c.startswith('/') else base + '/' + c
+                  for c in re.findall(r'["\']([\w./-]+\.js)["\']', js)][:30]
+    raise RuntimeError(f'no feed key found ({len(seen)} scripts read; ' + '; '.join(DIAG[:5]) + ')')
 
 
 def pinnacle_lines(sched):
