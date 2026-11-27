@@ -1,6 +1,7 @@
 data/*
 !data/recruiting/
 !data/history/
+!data/lines/
 out/
 __pycache__/
 *.pyc
