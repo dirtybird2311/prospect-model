@@ -1,6 +1,7 @@
 name: Pull NFL lines
 
-# Pinnacle spreads and totals for upcoming games, with nflverse as the fallback. Snapshots go to data/lines/.
+# Pinnacle spreads, totals and moneylines for upcoming NFL games, read from OddsPortal with OddsHarvester;
+# nflverse's consensus lines fill any game that is missing. Snapshots go to data/lines/.
 # Runs Tue and Thu mornings, plus Sat and Sun before kickoff; also on demand from the Actions tab.
 on:
   workflow_dispatch:
@@ -21,12 +22,25 @@ concurrency:
 jobs:
   pull:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Pull lines
+      - name: Install OddsHarvester
+        run: |
+          pip install -q oddsharvester==0.20.0
+          python -m playwright install --with-deps chromium
+      - name: Read Pinnacle lines from OddsPortal
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          mkdir -p data/lines
+          oddsharvester upcoming -s american-football -l nfl \
+            -m home_away,over_under,asian_handicap --target-bookmaker Pinnacle \
+            --request-delay 2 -f json -o data/lines/oddsportal_raw --headless 2>&1 | tail -40 | tee data/lines/oddsportal_log.txt
+      - name: Build the lines file
         run: python3 scripts/fetch_lines.py | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Commit the snapshot
         run: |

@@ -1,33 +1,29 @@
-"""Pull NFL game lines (spread and total) for upcoming games and save a dated snapshot.
+"""Build the NFL lines file (spread, total, win odds) for upcoming games and save a dated snapshot.
 
     python3 scripts/fetch_lines.py
 
 Source order:
-  1. Pinnacle, from the public JSON feed its own website reads (guest.api.arcadia.pinnacle.com).
-     Pinnacle blocks some regions; if the feed refuses or fails, we do not route around it.
-  2. nflverse's schedule file (consensus spread and total), which is always the fallback.
+  1. Pinnacle's lines as shown on OddsPortal, read by the OddsHarvester step of the GitHub workflow
+     (data/lines/oddsportal_raw.json). This script only parses that file.
+  2. nflverse's schedule file (consensus spread and total) for any game OddsPortal didn't give us.
 
-Writes data/lines/lines_<UTC timestamp>.csv (one snapshot per pull, so line movement is kept) and
-data/lines/latest.csv. Columns: season, week, gameday, kickoff_utc, away_team, home_team, spread_home
-(negative = home favored), total, home_implied, away_implied, home_win_prob (no-vig, Pinnacle only), source.
-Lines are model inputs only; they are never published on the site.
+Writes data/lines/lines_<UTC timestamp>.csv (one snapshot per pull, so line movement is kept),
+data/lines/latest.csv and data/lines/status.txt. Columns: season, week, gameday, kickoff_utc, away_team,
+home_team, spread_home (negative = home favored), total, home_implied, away_implied, home_win_prob
+(no-vig, Pinnacle only), source. Lines are model inputs only; they are never published on the site.
 """
 import csv
+import glob
 import io
 import json
-import os
 import re
 import sys
-import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parent.parent / 'data' / 'lines'
 NFLVERSE = 'https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv'
-PIN_SITE = 'https://www.pinnacle.com/en/football/nfl/matchups/'
-PIN_API = 'https://guest.api.arcadia.pinnacle.com/0.1'
-NFL_LEAGUE = 889
 UA = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
 TEAMS = {
     'Arizona Cardinals': 'ARI', 'Atlanta Falcons': 'ATL', 'Baltimore Ravens': 'BAL', 'Buffalo Bills': 'BUF',
@@ -54,10 +50,21 @@ def implied(spread_home, total):
     return round(home, 2), round(total - home, 2)
 
 
+def to_dec(v):
+    """A price as decimal odds; accepts decimal (1.91), American (-110, +120) or fractional (10/11)."""
+    v = str(v).strip()
+    if '/' in v:
+        a, b = v.split('/')
+        return 1 + float(a) / float(b)
+    x = float(v)
+    if abs(x) >= 100:
+        return 1 + (x / 100 if x > 0 else 100 / -x)
+    return x
+
+
 def no_vig(p1, p2):
-    """Two American prices -> no-vig probability of the first side."""
-    dec = lambda a: 1 + (a / 100 if a > 0 else 100 / -a)
-    q1, q2 = 1 / dec(p1), 1 / dec(p2)
+    """Two prices -> no-vig probability of the first side."""
+    q1, q2 = 1 / to_dec(p1), 1 / to_dec(p2)
     return q1 / (q1 + q2)
 
 
@@ -94,83 +101,66 @@ def nflverse_lines(games):
     return out
 
 
-# ---------------------------------------------------------------- Pinnacle (public website feed)
-KEY_RE = re.compile(r'x-api-key["\']?\s*[:,=]\s*["\']([A-Za-z0-9]{20,})["\']', re.I)
-DIAG = []
+# ---------------------------------------------------------------- OddsPortal (Pinnacle)
+LINE_RE = re.compile(r'(over_under|asian_handicap)_(-?\d+(?:_\d+)?)')
 
 
-def pinnacle_key():
-    """The feed key the website itself sends; found in the page or its scripts (and the chunks they load)."""
-    page = get(PIN_SITE)
-    m = KEY_RE.search(page)
-    if m:
-        return m.group(1)
-    seen, queue = set(), re.findall(r'(?:src|href)=["\']?([^"\'\s>]+\.js)', page)
-    DIAG.append(f'page {len(page)} chars, {len(queue)} scripts, arcadia in page: {"arcadia" in page}')
-    while queue and len(seen) < 40:
-        s = queue.pop(0)
-        url = s if s.startswith('http') else 'https://www.pinnacle.com' + ('' if s.startswith('/') else '/') + s
-        if url in seen:
-            continue
-        seen.add(url)
-        try:
-            js = get(url)
-        except Exception:
-            continue
-        m = KEY_RE.search(js)
-        if m:
-            return m.group(1)
-        if 'arcadia' in js:
-            DIAG.append(f'arcadia mentioned in {url.rsplit("/", 1)[-1]}')
-            if os.environ.get('LINES_DEBUG'):
-                snips = [js[max(0, m.start() - 160):m.end() + 160] for m in re.finditer(r'arcadia|api-?key|apikey', js, re.I)][:12]
-                with open(OUT / 'debug.txt', 'a') as f:
-                    f.write(f'== {url}\n' + '\n--\n'.join(snips) + '\n')
-        base = url.rsplit('/', 1)[0]
-        queue += [c if c.startswith('http') or c.startswith('/') else base + '/' + c
-                  for c in re.findall(r'["\']([\w./-]+\.js)["\']', js)][:30]
-    raise RuntimeError(f'no feed key found ({len(seen)} scripts read; ' + '; '.join(DIAG[:5]) + ')')
+def _line(token):
+    sign = -1 if token.startswith('-') else 1
+    parts = token.lstrip('-').split('_')
+    return sign * float(parts[0] + ('.' + parts[1] if len(parts) > 1 else ''))
 
 
-def pinnacle_lines(sched):
-    key = pinnacle_key()
-    hdr = {'x-api-key': key, 'Referer': 'https://www.pinnacle.com/', 'Origin': 'https://www.pinnacle.com',
-           'Accept': 'application/json'}
-    matchups = json.loads(get(f'{PIN_API}/leagues/{NFL_LEAGUE}/matchups', hdr))
-    markets = json.loads(get(f'{PIN_API}/leagues/{NFL_LEAGUE}/markets/straight', hdr))
-    games = {}
-    for m in matchups:
-        if m.get('type') != 'matchup' or m.get('parentId') or len(m.get('participants', [])) != 2:
-            continue
-        side = {p['alignment']: TEAMS.get(p['name']) for p in m['participants']}
-        if not side.get('home') or not side.get('away'):
-            continue
-        games[m['id']] = {'home': side['home'], 'away': side['away'], 'start': m.get('startTime', '')}
-    lines = {}
-    for mk in markets:
-        g = games.get(mk.get('matchupId'))
-        if not g or mk.get('period') != 0 or mk.get('isAlternate') or mk.get('status') not in (None, 'open'):
-            continue
-        prices = {p.get('designation'): p for p in mk.get('prices', [])}
-        rec = lines.setdefault(mk['matchupId'], {})
-        if mk.get('type') == 'spread' and 'home' in prices:
-            rec['spread_home'] = float(prices['home']['points'])
-        elif mk.get('type') == 'total' and 'over' in prices:
-            rec['total'] = float(prices['over']['points'])
-        elif mk.get('type') == 'moneyline' and 'home' in prices and 'away' in prices:
-            rec['home_win_prob'] = round(no_vig(prices['home']['price'], prices['away']['price']), 4)
+def _pin(entries):
+    """The Pinnacle row of one market's bookmaker list."""
+    for e in entries if isinstance(entries, list) else []:
+        if isinstance(e, dict) and 'pinnacle' in str(e.get('bookmaker_name', e.get('bookmaker', ''))).lower():
+            return e
+    return None
+
+
+def _closest_even(cands):
+    """Of (line, p_first_side) candidates, the line priced closest to 50/50 (the main line)."""
+    return min(cands, key=lambda c: abs(c[1] - 0.5))[0] if cands else None
+
+
+def oddsportal_lines(sched):
+    files = sorted(glob.glob(str(OUT / 'oddsportal_raw*.json')))
+    if not files:
+        raise RuntimeError('no OddsPortal file from the harvester step')
+    data = json.load(open(files[-1]))
+    matches = data if isinstance(data, list) else data.get('matches', data.get('data', []))
     by_teams = {(s['away_team'], s['home_team']): s for s in sched}
     out = []
-    for mid, rec in lines.items():
-        g = games[mid]
-        if 'spread_home' not in rec or 'total' not in rec:
+    for m in matches:
+        home, away = TEAMS.get(m.get('home_team', '')), TEAMS.get(m.get('away_team', ''))
+        if not home or not away:
             continue
-        s = by_teams.get((g['away'], g['home']), {})
-        h, a = implied(rec['spread_home'], rec['total'])
-        out.append({'season': s.get('season', ''), 'week': s.get('week', ''), 'gameday': s.get('gameday', g['start'][:10]),
-                    'kickoff_utc': g['start'], 'away_team': g['away'], 'home_team': g['home'],
-                    'spread_home': rec['spread_home'], 'total': rec['total'], 'home_implied': h, 'away_implied': a,
-                    'home_win_prob': rec.get('home_win_prob', ''), 'source': 'pinnacle'})
+        totals, spreads, win = [], [], ''
+        for k, v in m.items():
+            pin = _pin(v) if k.endswith('_market') else None
+            if not pin:
+                continue
+            if k.startswith('home_away'):
+                win = round(no_vig(pin['1'], pin['2']), 4)
+                continue
+            lm = LINE_RE.match(k)
+            if not lm:
+                continue
+            line = _line(lm.group(2))
+            if lm.group(1) == 'over_under':
+                totals.append((line, no_vig(pin['odds_over'], pin['odds_under'])))
+            else:
+                spreads.append((line, no_vig(pin['1'], pin['2'])))
+        total, spread_home = _closest_even(totals), _closest_even(spreads)
+        if total is None or spread_home is None:
+            continue
+        s = by_teams.get((away, home), {})
+        h, a = implied(spread_home, total)
+        out.append({'season': s.get('season', ''), 'week': s.get('week', ''), 'gameday': s.get('gameday', ''),
+                    'kickoff_utc': m.get('match_date', ''), 'away_team': away, 'home_team': home,
+                    'spread_home': spread_home, 'total': total, 'home_implied': h, 'away_implied': a,
+                    'home_win_prob': win, 'source': 'pinnacle (oddsportal)'})
     return out
 
 
@@ -178,12 +168,10 @@ def main():
     sched = upcoming(schedule())
     rows, note = [], ''
     try:
-        rows = pinnacle_lines(sched)
-        note = f'pinnacle: {len(rows)} games'
-    except urllib.error.HTTPError as e:
-        note = f'pinnacle refused ({e.code}); using nflverse'
-    except Exception as e:                              # any other failure: fall back, never retry around a block
-        note = f'pinnacle failed ({type(e).__name__}: {e}); using nflverse'
+        rows = oddsportal_lines(sched)
+        note = f'oddsportal/pinnacle: {len(rows)} games'
+    except Exception as e:
+        note = f'oddsportal failed ({type(e).__name__}: {e}); using nflverse'
     have = {(r['away_team'], r['home_team']) for r in rows}
     fill = [r for r in nflverse_lines(sched) if (r['away_team'], r['home_team']) not in have]
     rows += fill
@@ -195,7 +183,7 @@ def main():
             w = csv.DictWriter(f, fieldnames=FIELDS)
             w.writeheader()
             w.writerows(rows)
-    (OUT / 'status.txt').write_text(f'{stamp} {note}\n')
+    (OUT / 'status.txt').write_text(f'{stamp} {note}; {len(fill)} games from nflverse\n')
     print(f'{note}; {len(fill)} games from nflverse; {len(rows)} total -> {OUT}/lines_{stamp}.csv')
     for r in rows:
         print(f"  {r['gameday']} {r['away_team']:>3} @ {r['home_team']:<3} spread {r['spread_home']:+5.1f} total {r['total']:4.1f}  [{r['source']}]")
