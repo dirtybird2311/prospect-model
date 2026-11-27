@@ -2,6 +2,7 @@ data/*
 !data/recruiting/
 !data/history/
 !data/lines/
+!data/props/
 out/
 __pycache__/
 *.pyc
