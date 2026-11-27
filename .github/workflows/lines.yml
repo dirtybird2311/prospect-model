@@ -10,7 +10,7 @@ on:
     - cron: '41 15 * * 6,0'    # Sat, Sun 10:41 am ET
   push:
     branches: [main]
-    paths: [scripts/fetch_lines.py]
+    paths: [scripts/fetch_lines.py, .github/workflows/lines.yml]
 
 permissions:
   contents: write
@@ -35,11 +35,17 @@ jobs:
       - name: Read Pinnacle lines from OddsPortal
         continue-on-error: true
         timeout-minutes: 30
+        env:
+          BOOK: ${{ vars.LINES_BOOKMAKER || 'Pinnacle' }}
+          DIAG: '1'
         run: |
           mkdir -p data/lines
-          oddsharvester upcoming -s american-football -l nfl \
-            -m home_away,over_under,asian_handicap --target-bookmaker Pinnacle \
-            --request-delay 2 -f json -o data/lines/oddsportal_raw --headless 2>&1 | tail -40 | tee data/lines/oddsportal_log.txt
+          extra=""
+          [ -z "$DIAG" ] && extra="--target-bookmaker $BOOK"
+          oddsharvester upcoming -s american-football -l nfl --kickoff-within-hours 192 \
+            -m home_away,over_under,asian_handicap --period full_time $extra \
+            -c 1 --request-delay 2 -f json -o data/lines/oddsportal_raw --headless > data/lines/oddsportal_log.txt 2>&1 || true
+          tail -5 data/lines/oddsportal_log.txt
       - name: Build the lines file
         run: python3 scripts/fetch_lines.py | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Commit the snapshot
